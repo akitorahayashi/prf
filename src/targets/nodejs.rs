@@ -150,7 +150,8 @@ mod tests {
         let scope = ScanScope::new(vec![project_root.path().to_path_buf()], true, true);
         let items = target.discover(&scope).expect("scan succeeds");
 
-        let paths: Vec<_> = items.iter().map(|i| i.path.file_name().unwrap().to_str().unwrap()).collect();
+        let paths: Vec<_> =
+            items.iter().map(|i| i.path.file_name().unwrap().to_str().unwrap()).collect();
         assert!(paths.contains(&"node_modules"));
         assert!(paths.contains(&".pnpm-store"));
         assert!(paths.contains(&"playwright-report"));
