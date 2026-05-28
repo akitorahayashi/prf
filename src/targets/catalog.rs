@@ -1,19 +1,21 @@
 use super::brew::BrewTarget;
 use super::category::Category;
 use super::docker::DockerTarget;
+use super::mise::MiseTarget;
 use super::nodejs::NodejsTarget;
 use super::python::PythonTarget;
 use super::rust::RustTarget;
 use super::target::CleanupTarget;
 use super::xcode::XcodeTarget;
 
-const CATEGORY_ORDER: [Category; 6] = [
+const CATEGORY_ORDER: [Category; 7] = [
     Category::Xcode,
     Category::Python,
     Category::Rust,
     Category::Nodejs,
     Category::Brew,
     Category::Docker,
+    Category::Mise,
 ];
 
 pub fn category_order() -> &'static [Category] {
@@ -80,6 +82,7 @@ pub fn build_targets(categories: &[Category], current: bool) -> Vec<Box<dyn Clea
             Category::Nodejs => targets.push(Box::new(NodejsTarget::new())),
             Category::Brew => targets.push(Box::new(BrewTarget::new())),
             Category::Docker => targets.push(Box::new(DockerTarget::new())),
+            Category::Mise => targets.push(Box::new(MiseTarget::new())),
         }
     }
 
@@ -95,6 +98,7 @@ mod tests {
         let categories = categories_for_mode(true);
         assert!(!categories.contains(&Category::Brew));
         assert!(!categories.contains(&Category::Docker));
+        assert!(!categories.contains(&Category::Mise));
     }
 
     #[test]
@@ -105,7 +109,13 @@ mod tests {
 
     #[test]
     fn build_targets_excludes_brew_and_docker_in_current_mode() {
-        let requested = vec![Category::Xcode, Category::Brew, Category::Docker, Category::Python];
+        let requested = vec![
+            Category::Xcode,
+            Category::Brew,
+            Category::Docker,
+            Category::Mise,
+            Category::Python,
+        ];
 
         let targets = build_targets(&requested, true);
         let target_categories: Vec<Category> =
@@ -113,6 +123,7 @@ mod tests {
 
         assert!(!target_categories.contains(&Category::Brew));
         assert!(!target_categories.contains(&Category::Docker));
+        assert!(!target_categories.contains(&Category::Mise));
     }
 
     #[test]

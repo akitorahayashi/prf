@@ -8,6 +8,7 @@ pub enum Category {
     Nodejs,
     Brew,
     Docker,
+    Mise,
 }
 
 impl Category {
@@ -19,6 +20,7 @@ impl Category {
             "nodejs" => Some(Category::Nodejs),
             "brew" => Some(Category::Brew),
             "docker" => Some(Category::Docker),
+            "mise" => Some(Category::Mise),
             _ => None,
         }
     }
@@ -31,6 +33,7 @@ impl Category {
             Category::Nodejs => "nodejs",
             Category::Brew => "brew",
             Category::Docker => "docker",
+            Category::Mise => "mise",
         }
     }
 
@@ -42,11 +45,12 @@ impl Category {
             Category::Nodejs => "Node.js",
             Category::Brew => "Homebrew",
             Category::Docker => "Docker",
+            Category::Mise => "mise",
         }
     }
 
     pub fn supports_current_mode(&self, current: bool) -> bool {
-        !current || !matches!(self, Category::Brew | Category::Docker)
+        !current || !matches!(self, Category::Brew | Category::Docker | Category::Mise)
     }
 }
 

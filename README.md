@@ -43,6 +43,7 @@ prf scan --type python -v       # Show detailed Python cleanup targets
 | `nodejs`  | NodeJS artifacts including `node_modules`, `.next`, `.nuxt`, and `.svelte-kit`. |
 | `brew`    | Homebrew caches and build artifacts. Skipped in `--current` mode. |
 | `docker`  | Docker cache and unused data. Skipped in `--current` mode. |
+| `mise`    | Mise cache and temporary files. Skipped in `--current` mode. |
 
 ### Safety Model
 

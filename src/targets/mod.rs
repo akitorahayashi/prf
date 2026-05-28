@@ -3,6 +3,7 @@ pub mod catalog;
 pub mod category;
 pub mod docker;
 pub mod item;
+pub mod mise;
 pub mod name_matcher;
 pub mod nodejs;
 pub mod python;
