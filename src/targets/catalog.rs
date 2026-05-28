@@ -77,7 +77,7 @@ pub fn build_targets(categories: &[Category], current: bool) -> Vec<Box<dyn Clea
             Category::Xcode => targets.push(Box::new(XcodeTarget::new(current))),
             Category::Python => targets.push(Box::new(PythonTarget::new())),
             Category::Rust => targets.push(Box::new(RustTarget::new())),
-            Category::Nodejs => targets.push(Box::new(NodejsTarget::new())),
+            Category::Nodejs => targets.push(Box::new(NodejsTarget::new(current))),
             Category::Brew => targets.push(Box::new(BrewTarget::new())),
             Category::Docker => targets.push(Box::new(DockerTarget::new())),
         }
