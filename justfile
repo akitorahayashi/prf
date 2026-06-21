@@ -23,7 +23,7 @@ check:
     just --fmt --check --unstable
 
 test:
-    cargo test --all-targets --all-features
+    cargo test --all-targets --all-features --quiet
 
 coverage:
     rm -rf target/tarpaulin coverage
