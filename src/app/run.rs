@@ -39,8 +39,8 @@ pub fn execute(options: RunOptions) -> Result<(), AppError> {
         eprintln!("[prf::run] finished scan phase");
     }
 
-    let docker_requested_initially =
-        options.categories.contains(&Category::Docker) && !options.current;
+    // catalog::resolve excludes Docker under --current, so the membership check is sufficient.
+    let docker_requested_initially = options.categories.contains(&Category::Docker);
     if report.total_size() == 0 && !docker_requested_initially {
         println!("Nothing to delete. All selected categories are already clean.");
         return Ok(());
@@ -59,7 +59,7 @@ pub fn execute(options: RunOptions) -> Result<(), AppError> {
         options.categories.clone()
     };
 
-    let docker_selected = selected_categories.contains(&Category::Docker) && !options.current;
+    let docker_selected = selected_categories.contains(&Category::Docker);
     let subset = report.subset(&selected_categories);
     if subset.total_size() == 0 && !docker_selected {
         println!("Nothing to delete. All selected categories are already clean.");

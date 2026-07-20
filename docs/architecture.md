@@ -86,3 +86,9 @@ tests/
 - Scanning is non-destructive.
 - Deletion requires explicit confirmation unless `-y/--yes` is provided.
 - Current-directory mode excludes system-wide categories (`brew` and `docker`).
+  `Category::supports_current_mode` is the single policy source for this exclusion: `catalog::resolve`
+  enforces it as the user-facing gate that rejects unsupported categories, and `catalog::build_targets`
+  consults the same predicate when constructing targets. Orchestration does not re-derive the policy.
+- The default scan root is `~/Desktop`; when `HOME` is unset and neither an explicit path nor
+  `--current` is given, root resolution fails explicitly rather than silently falling back to the
+  current directory.

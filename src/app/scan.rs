@@ -12,7 +12,7 @@ use crate::output::progress::{discovery_spinner_style, size_progress_style};
 use crate::output::report::{print_list_results, print_scan_report};
 use crate::targets::catalog;
 use crate::targets::category::Category;
-use crate::targets::item::{CleanupItem, ItemKind};
+use crate::targets::item::CleanupItem;
 use crate::targets::report::ScanReport;
 use crate::targets::target::ScanScope;
 
@@ -48,22 +48,10 @@ pub fn scan_categories(
         return Ok(ScanReport::new());
     }
 
+    // catalog::resolve is the sole current-mode policy gate; unsupported categories are
+    // rejected before orchestration, so no policy is re-derived here.
     let targets = catalog::build_targets(categories, scope.current());
     if targets.is_empty() {
-        if scope.current() {
-            let requested_unique = catalog::unique_categories(categories.to_vec());
-            let unsupported = catalog::unsupported_for_current(&requested_unique);
-            if !unsupported.is_empty() && unsupported.len() == requested_unique.len() {
-                let names = unsupported
-                    .iter()
-                    .map(|category| category.display_name())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                return Err(AppError::NoTargetsToScan(format!(
-                    "requested categories disabled in --current mode: {names}"
-                )));
-            }
-        }
         return Ok(ScanReport::new());
     }
 
@@ -102,7 +90,7 @@ pub fn scan_categories(
     let total_items = discovered_items.len();
     let size_bar = progress.add(ProgressBar::new(total_items as u64));
     size_bar.set_style(size_progress_style());
-    compute_sizes_parallel(&mut discovered_items, scope.verbose(), Some(&size_bar))?;
+    compute_sizes_parallel(&mut discovered_items, scope.verbose(), Some(&size_bar));
     size_bar.finish_and_clear();
 
     let _ = progress.println(format!(
@@ -150,27 +138,15 @@ fn compute_sizes_parallel(
     items: &mut [CleanupItem],
     verbose: bool,
     progress: Option<&ProgressBar>,
-) -> Result<(), AppError> {
-    items.par_iter_mut().try_for_each(|item| {
+) {
+    items.par_iter_mut().for_each(|item| {
         if item.is_zero() {
-            item.size = match item.kind {
-                ItemKind::Directory => path_size(&item.path, verbose)?,
-                ItemKind::File => match item.path.metadata() {
-                    Ok(metadata) => metadata.len(),
-                    Err(err) => {
-                        if verbose {
-                            eprintln!("Skipping {}: {}", item.path.display(), err);
-                        }
-                        0
-                    }
-                },
-            };
+            item.size = path_size(&item.path, verbose);
         }
         if let Some(pb) = progress {
             pb.inc(1);
         }
-        Ok(())
-    })
+    });
 }
 
 #[cfg(test)]
@@ -196,11 +172,30 @@ mod tests {
             CleanupItem::file(Category::Nodejs, file.path().to_path_buf(), 0),
         ];
 
-        compute_sizes_parallel(&mut items, false, None).expect("size calculation succeeds");
+        compute_sizes_parallel(&mut items, false, None);
 
         assert!(
             items.iter().all(|item| item.size > 0),
             "expected non-zero sizes after measurement"
+        );
+    }
+
+    #[test]
+    fn compute_sizes_parallel_tolerates_missing_paths() {
+        let temp = TempDir::new().expect("temp directory is created");
+        let missing_dir = temp.child("gone_dir");
+        let missing_file = temp.child("gone_file.log");
+
+        let mut items = vec![
+            CleanupItem::directory(Category::Nodejs, missing_dir.path().to_path_buf(), 0),
+            CleanupItem::file(Category::Nodejs, missing_file.path().to_path_buf(), 0),
+        ];
+
+        compute_sizes_parallel(&mut items, false, None);
+
+        assert!(
+            items.iter().all(|item| item.size == 0),
+            "missing directory and file paths must size to 0 without erroring"
         );
     }
 }

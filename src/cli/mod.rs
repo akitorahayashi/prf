@@ -43,7 +43,7 @@ fn try_execute() -> Result<(), AppError> {
             let categories = args.resolve_categories()?;
             let options = app::scan::ScanOptions {
                 categories,
-                roots: resolve_roots_with_current(&args.paths, args.current),
+                roots: resolve_roots_with_current(&args.paths, args.current)?,
                 verbose: args.verbose,
                 list: args.list,
                 current: args.current,
@@ -56,7 +56,7 @@ fn try_execute() -> Result<(), AppError> {
             let options = app::run::RunOptions {
                 categories,
                 interactive,
-                roots: resolve_roots_with_current(&args.paths, args.current),
+                roots: resolve_roots_with_current(&args.paths, args.current)?,
                 verbose: args.verbose,
                 assume_yes: args.yes,
                 current: args.current,
