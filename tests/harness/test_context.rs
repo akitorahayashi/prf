@@ -31,7 +31,23 @@ impl TestContext {
         fs::create_dir_all(&work_dir).expect("work directory is created");
         fs::create_dir_all(&bin_dir).expect("mock bin directory is created");
 
-        Self { _root: root, home, work_dir, bin_dir, env_vars: RefCell::new(HashMap::new()) }
+        let context =
+            Self { _root: root, home, work_dir, bin_dir, env_vars: RefCell::new(HashMap::new()) };
+        context.set_controlled_path();
+        context
+    }
+
+    /// Pins PATH to the mock bin directory followed by minimal system dirs, so external
+    /// tools such as `docker` resolve only when a mock has been installed. This keeps tests
+    /// hermetic regardless of what is on the host PATH.
+    fn set_controlled_path(&self) {
+        let path = std::env::join_paths([
+            self.bin_dir.clone(),
+            PathBuf::from("/usr/bin"),
+            PathBuf::from("/bin"),
+        ])
+        .expect("controlled PATH is valid");
+        self.set_env("PATH", path);
     }
 
     pub(crate) fn home(&self) -> &Path {
@@ -84,11 +100,8 @@ impl TestContext {
             fs::set_permissions(&path, permissions).expect("mock command is executable");
         }
 
-        let current_path = std::env::var_os("PATH").unwrap_or_default();
-        let mut paths = std::env::split_paths(&current_path).collect::<Vec<_>>();
-        paths.insert(0, self.bin_dir.clone());
-        let path_value = std::env::join_paths(paths).expect("mock PATH is valid");
-        self.set_env("PATH", path_value);
+        // The bin directory is already first on the controlled PATH set in `new`, so writing
+        // the script here is enough to make the tool resolvable.
         path
     }
 

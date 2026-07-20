@@ -29,7 +29,9 @@ fn scan_list_prints_target_listing() {
         .arg(ctx.home())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Found cleanup targets"));
+        .stdout(predicate::str::contains("Found cleanup targets"))
+        // No docker mock installed, so the controlled PATH must keep the host daemon out.
+        .stdout(predicate::str::contains("Docker").not());
 }
 
 #[test]
