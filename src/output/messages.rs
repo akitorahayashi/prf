@@ -40,25 +40,24 @@ pub fn aborted() -> &'static str {
     "Aborted. No files were deleted."
 }
 
-pub fn deletion_summary(
-    freed: u64,
-    deleted_items: usize,
-    skipped: usize,
-    categories: usize,
-) -> String {
+/// Summarizes a completed run. `freed` is a scan-time estimate of the space the removed
+/// targets occupied (prefixed with `~` because it is not a post-deletion re-measurement),
+/// `removed` counts targets whose path is gone afterwards, and `failed` counts targets left
+/// behind (for example a directory that was not empty after cleanup).
+pub fn deletion_summary(freed: u64, removed: usize, failed: usize, categories: usize) -> String {
     let mut summary = format!(
-        "Reclaimed {} across {} {}: {} {} removed",
+        "Reclaimed ~{} across {} {}: {} {} removed",
         format_bytes(freed),
         categories,
         plural(categories, "category", "categories"),
-        deleted_items,
-        plural(deleted_items, "item", "items"),
+        removed,
+        plural(removed, "item", "items"),
     );
-    if skipped > 0 {
+    if failed > 0 {
         summary.push_str(&format!(
-            ", {} {} skipped (not empty after cleanup)",
-            skipped,
-            plural(skipped, "directory", "directories"),
+            ", {} {} could not be removed (not empty after cleanup)",
+            failed,
+            plural(failed, "item", "items"),
         ));
     }
     summary.push('.');

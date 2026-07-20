@@ -37,17 +37,13 @@ impl TestContext {
         context
     }
 
-    /// Pins PATH to the mock bin directory followed by minimal system dirs, so external
-    /// tools such as `docker` resolve only when a mock has been installed. This keeps tests
-    /// hermetic regardless of what is on the host PATH.
+    /// Pins PATH to the mock bin directory only, so external tools such as `docker` resolve
+    /// solely when a mock has been installed. Including system dirs like `/usr/bin` would let
+    /// a host-installed `docker` leak in, so they are deliberately excluded; the CLI shells
+    /// out only to `docker`, and mock scripts rely on the kernel resolving their `#!/bin/sh`
+    /// shebang directly rather than on PATH.
     fn set_controlled_path(&self) {
-        let path = std::env::join_paths([
-            self.bin_dir.clone(),
-            PathBuf::from("/usr/bin"),
-            PathBuf::from("/bin"),
-        ])
-        .expect("controlled PATH is valid");
-        self.set_env("PATH", path);
+        self.set_env("PATH", &self.bin_dir);
     }
 
     pub(crate) fn home(&self) -> &Path {

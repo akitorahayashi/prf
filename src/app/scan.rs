@@ -92,7 +92,7 @@ pub fn scan_categories(
     let total_items = discovered_items.len();
     let size_bar = progress.add(ProgressBar::new(total_items as u64));
     size_bar.set_style(size_progress_style());
-    compute_sizes_parallel(&mut discovered_items, scope.verbose(), Some(&size_bar));
+    compute_sizes_parallel(&mut discovered_items, scope.verbose(), Some(&size_bar))?;
     size_bar.finish_and_clear();
 
     let _ = progress.println(messages::size_calculation_complete(total_items));
@@ -109,17 +109,18 @@ fn compute_sizes_parallel(
     items: &mut [CleanupItem],
     verbose: bool,
     progress: Option<&ProgressBar>,
-) {
-    items.par_iter_mut().for_each(|item| {
+) -> Result<(), AppError> {
+    items.par_iter_mut().try_for_each(|item| {
         if item.is_zero()
             && let CleanupAction::Path { path, .. } = &item.action
         {
-            item.size = path_size(path, verbose);
+            item.size = path_size(path, verbose)?;
         }
         if let Some(pb) = progress {
             pb.inc(1);
         }
-    });
+        Ok(())
+    })
 }
 
 #[cfg(test)]
@@ -145,7 +146,7 @@ mod tests {
             CleanupItem::file(Category::Nodejs, file.path().to_path_buf(), 0),
         ];
 
-        compute_sizes_parallel(&mut items, false, None);
+        compute_sizes_parallel(&mut items, false, None).expect("size calculation succeeds");
 
         assert!(
             items.iter().all(|item| item.size > 0),
@@ -164,7 +165,8 @@ mod tests {
             CleanupItem::file(Category::Nodejs, missing_file.path().to_path_buf(), 0),
         ];
 
-        compute_sizes_parallel(&mut items, false, None);
+        compute_sizes_parallel(&mut items, false, None)
+            .expect("missing (NotFound) paths are tolerated");
 
         assert!(
             items.iter().all(|item| item.size == 0),

@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use indicatif::{MultiProgress, ProgressBar};
 use rayon::prelude::*;
@@ -87,15 +86,21 @@ pub fn execute(options: RunOptions) -> Result<(), AppError> {
         }
     };
 
-    let docker_items = subset.report_for(Category::Docker).map_or(0, |report| report.items.len());
-    let deleted_items = fs_summary.deleted + docker_items;
+    // Docker cleanup ran (the match above only yields Ok when the prune succeeded), so its
+    // item and reclaimable estimate count toward the outcome.
+    let docker_report = subset.report_for(Category::Docker);
+    let docker_items = docker_report.map_or(0, |report| report.items.len());
+    let docker_freed = docker_report.map_or(0, |report| report.total_size());
+
+    let removed_items = fs_summary.removed + docker_items;
+    let freed_estimate = fs_summary.freed_estimate + docker_freed;
     let categories_with_items = subset.categories().len();
     println!(
         "{}",
         messages::deletion_summary(
-            subset.total_size(),
-            deleted_items,
-            fs_summary.skipped,
+            freed_estimate,
+            removed_items,
+            fs_summary.failed,
             categories_with_items
         )
     );
@@ -127,11 +132,17 @@ fn run_docker_cleanup_with_handling(verbose: bool) -> Result<(), AppError> {
 struct FsDeletion {
     path: PathBuf,
     kind: ItemKind,
+    size: u64,
 }
 
 struct DeletionSummary {
-    deleted: usize,
-    skipped: usize,
+    /// Targets whose path no longer exists after the deletion pass (verified outcome).
+    removed: usize,
+    /// Targets still present afterwards (e.g. a directory left non-empty).
+    failed: usize,
+    /// Scan-time size of the removed targets. An estimate, not a re-measurement: roots do
+    /// not nest after pruning, so summing their sizes does not double-count.
+    freed_estimate: u64,
 }
 
 fn is_strict_descendant(child: &Path, ancestor: &Path) -> bool {
@@ -166,7 +177,7 @@ fn delete_items(
         }
 
         seen_paths.insert(key, prepared.len());
-        prepared.push(FsDeletion { path: canonicalized, kind: *kind });
+        prepared.push(FsDeletion { path: canonicalized, kind: *kind, size: item.size });
     }
 
     let roots: Vec<&FsDeletion> = prepared
@@ -177,22 +188,34 @@ fn delete_items(
         .collect();
 
     if roots.is_empty() {
-        return Ok(DeletionSummary { deleted: 0, skipped: 0 });
+        return Ok(DeletionSummary { removed: 0, failed: 0, freed_estimate: 0 });
     }
 
     let pb = progress.add(ProgressBar::new(roots.len() as u64));
     pb.set_style(deletion_progress_style());
 
-    let skipped = AtomicUsize::new(0);
-    roots.par_iter().try_for_each(|deletion| {
-        skipped.fetch_add(remove_item(&deletion.path, deletion.kind, verbose)?, Ordering::Relaxed);
-        pb.inc(1);
-        Ok::<(), AppError>(())
-    })?;
+    // A hard error aborts; otherwise a target counts as removed only if its path is gone
+    // afterwards, so a skipped (still non-empty) directory is not reported as reclaimed.
+    let outcomes: Result<Vec<(bool, u64)>, AppError> = roots
+        .par_iter()
+        .map(|deletion| {
+            remove_item(&deletion.path, deletion.kind, verbose)?;
+            let removed = !deletion.path.exists();
+            pb.inc(1);
+            Ok((removed, deletion.size))
+        })
+        .collect();
+    let outcomes = outcomes?;
 
     pb.finish_and_clear();
-    let _ = progress.println(messages::deletion_complete(roots.len()));
-    Ok(DeletionSummary { deleted: roots.len(), skipped: skipped.load(Ordering::Relaxed) })
+
+    let removed = outcomes.iter().filter(|(removed, _)| *removed).count();
+    let freed_estimate =
+        outcomes.iter().filter(|(removed, _)| *removed).map(|(_, size)| size).sum();
+    let failed = outcomes.len() - removed;
+
+    let _ = progress.println(messages::deletion_complete(removed));
+    Ok(DeletionSummary { removed, failed, freed_estimate })
 }
 
 #[cfg(test)]
@@ -270,7 +293,7 @@ mod tests {
 
         node_modules.assert(predicates::path::missing());
         nested_pycache.assert(predicates::path::missing());
-        assert_eq!(summary.deleted, 1, "nested child is subsumed by the parent deletion");
-        assert_eq!(summary.skipped, 0, "no directory should be left behind");
+        assert_eq!(summary.removed, 1, "nested child is subsumed by the parent deletion");
+        assert_eq!(summary.failed, 0, "no target should be left behind");
     }
 }
