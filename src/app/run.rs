@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,10 +12,10 @@ use crate::output::bytes::format_bytes;
 use crate::output::progress::deletion_progress_style;
 use crate::output::prompt::{confirm_deletion, prompt_for_categories};
 use crate::output::report::print_deletion_plan;
+use crate::report::ScanReport;
 use crate::targets::category::Category;
 use crate::targets::docker;
-use crate::targets::item::CleanupItem;
-use crate::targets::report::ScanReport;
+use crate::targets::item::{CleanupAction, CleanupItem, ItemKind};
 use crate::targets::target::ScanScope;
 
 use super::scan::scan_categories;
@@ -81,16 +82,10 @@ pub fn execute(options: RunOptions) -> Result<(), AppError> {
         eprintln!("[prf::run] confirmation obtained");
     }
 
-    let items_to_delete: Vec<CleanupItem> =
-        flatten_items_for_categories(&subset, &selected_categories);
-    let filesystem_items: Vec<CleanupItem> =
-        items_to_delete.into_iter().filter(|item| item.category != Category::Docker).collect();
-
-    let fs_result = if filesystem_items.is_empty() {
-        Ok(())
-    } else {
-        delete_items(&filesystem_items, &progress, options.verbose)
-    };
+    // The typed action carries the filesystem/command distinction: delete_items only ever
+    // touches Path actions, and the Docker prune is routed to run_cleanup below.
+    let items_to_delete = flatten_items_for_categories(&subset, &selected_categories);
+    let fs_result = delete_items(&items_to_delete, &progress, options.verbose);
 
     let docker_result =
         if docker_selected { run_docker_cleanup_with_handling(options.verbose) } else { Ok(()) };
@@ -139,55 +134,55 @@ fn run_docker_cleanup_with_handling(verbose: bool) -> Result<(), AppError> {
     }
 }
 
+struct FsDeletion {
+    path: PathBuf,
+    kind: ItemKind,
+}
+
 fn delete_items(
     items: &[CleanupItem],
     progress: &Arc<MultiProgress>,
     verbose: bool,
 ) -> Result<(), AppError> {
-    if items.is_empty() {
-        return Ok(());
-    }
-
-    let mut prepared_items: Vec<CleanupItem> = Vec::new();
-    let mut seen_paths: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut prepared: Vec<FsDeletion> = Vec::new();
+    let mut seen_paths: HashMap<String, usize> = HashMap::new();
 
     for item in items {
-        let canonicalized = std::fs::canonicalize(&item.path).unwrap_or_else(|_| item.path.clone());
+        let CleanupAction::Path { path, kind } = &item.action else {
+            continue;
+        };
+
+        let canonicalized = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
         let key = canonicalized.to_string_lossy().into_owned();
 
         if let Some(index) = seen_paths.get(&key).copied() {
-            if prepared_items[index].kind != item.kind {
-                prepared_items[index].kind = crate::targets::item::ItemKind::Directory;
+            if prepared[index].kind != *kind {
+                prepared[index].kind = ItemKind::Directory;
             }
             continue;
         }
 
-        seen_paths.insert(key, prepared_items.len());
-        prepared_items.push(CleanupItem {
-            category: item.category,
-            path: canonicalized,
-            size: item.size,
-            kind: item.kind,
-        });
+        seen_paths.insert(key, prepared.len());
+        prepared.push(FsDeletion { path: canonicalized, kind: *kind });
     }
 
-    prepared_items.sort_by_key(|item| std::cmp::Reverse(item.path.components().count()));
+    if prepared.is_empty() {
+        return Ok(());
+    }
 
-    let pb = progress.add(ProgressBar::new(prepared_items.len() as u64));
+    prepared.sort_by_key(|deletion| std::cmp::Reverse(deletion.path.components().count()));
+
+    let pb = progress.add(ProgressBar::new(prepared.len() as u64));
     pb.set_style(deletion_progress_style());
 
-    prepared_items.par_iter().try_for_each(|item| {
-        remove_item(&item.path, item.kind, verbose)?;
+    prepared.par_iter().try_for_each(|deletion| {
+        remove_item(&deletion.path, deletion.kind, verbose)?;
         pb.inc(1);
         Ok::<(), AppError>(())
     })?;
 
     pb.finish_and_clear();
-    let _ = progress.println(format!(
-        "{}/{} Deletion complete",
-        prepared_items.len(),
-        prepared_items.len()
-    ));
+    let _ = progress.println(format!("{}/{} Deletion complete", prepared.len(), prepared.len()));
     Ok(())
 }
 

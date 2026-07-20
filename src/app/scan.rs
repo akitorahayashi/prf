@@ -10,10 +10,10 @@ use crate::error::AppError;
 use crate::fs::size::path_size;
 use crate::output::progress::{discovery_spinner_style, size_progress_style};
 use crate::output::report::{print_list_results, print_scan_report};
+use crate::report::ScanReport;
 use crate::targets::catalog;
 use crate::targets::category::Category;
-use crate::targets::item::CleanupItem;
-use crate::targets::report::ScanReport;
+use crate::targets::item::{CleanupAction, CleanupItem};
 use crate::targets::target::ScanScope;
 
 pub struct ScanOptions {
@@ -103,7 +103,7 @@ pub fn scan_categories(
 
     let mut report = ScanReport::new();
     for item in discovered_items {
-        report.add_items(item.category, vec![item]);
+        report.add_item(item);
     }
 
     Ok(report)
@@ -140,8 +140,10 @@ fn compute_sizes_parallel(
     progress: Option<&ProgressBar>,
 ) {
     items.par_iter_mut().for_each(|item| {
-        if item.is_zero() {
-            item.size = path_size(&item.path, verbose);
+        if item.is_zero()
+            && let CleanupAction::Path { path, .. } = &item.action
+        {
+            item.size = path_size(path, verbose);
         }
         if let Some(pb) = progress {
             pb.inc(1);

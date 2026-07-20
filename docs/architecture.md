@@ -17,6 +17,7 @@
 | Target ownership | `src/targets/` | Category model, target registry, and target-specific discovery/cleanup rules |
 | Filesystem boundary | `src/fs/` | Root resolution, size calculation, and deletion mechanics |
 | Output boundary | `src/output/` | Byte formatting, progress styles, reporting, and interactive prompts |
+| Scan model | `src/report.rs` | Category-grouped scan aggregation shared by `app` and `output`, owned by neither |
 | Error kernel | `src/error.rs` | Typed application error model |
 
 ## Package Structure
@@ -26,6 +27,7 @@ src/
 ├── main.rs
 ├── lib.rs
 ├── error.rs
+├── report.rs
 ├── cli/
 │   ├── mod.rs
 │   ├── scan.rs
@@ -39,7 +41,6 @@ src/
 │   ├── catalog.rs
 │   ├── category.rs
 │   ├── item.rs
-│   ├── report.rs
 │   ├── target.rs
 │   ├── name_matcher.rs
 │   ├── python.rs

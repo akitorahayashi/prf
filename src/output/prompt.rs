@@ -1,8 +1,8 @@
 use std::io::{self, Write};
 
 use crate::error::AppError;
+use crate::report::ScanReport;
 use crate::targets::category::Category;
-use crate::targets::report::ScanReport;
 
 use super::bytes::format_bytes;
 

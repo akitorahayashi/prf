@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 
 use dirs_next as dirs;
 
+use crate::report::ScanReport;
 use crate::targets::category::Category;
-use crate::targets::report::ScanReport;
+use crate::targets::item::{CleanupAction, CleanupItem};
 
 use super::bytes::format_bytes;
 
@@ -16,6 +17,13 @@ pub fn display_path(path: &Path) -> String {
     }
 
     path.display().to_string()
+}
+
+fn item_display(item: &CleanupItem) -> String {
+    match &item.action {
+        CleanupAction::Path { path, .. } => display_path(path),
+        CleanupAction::DockerPrune => "Docker reclaimable (docker system prune)".to_string(),
+    }
 }
 
 pub fn print_scan_report(report: &ScanReport, categories: &[Category], verbose: bool) {
@@ -31,7 +39,7 @@ pub fn print_scan_report(report: &ScanReport, categories: &[Category], verbose: 
             );
             if verbose {
                 for item in &category_report.items {
-                    println!("    • {:<60} {}", display_path(item.path()), format_bytes(item.size));
+                    println!("    • {:<60} {}", item_display(item), format_bytes(item.size));
                 }
             }
         }
@@ -64,9 +72,9 @@ pub fn print_deletion_plan(report: &ScanReport, categories: &[Category], verbose
             );
             for item in &category_report.items {
                 if verbose {
-                    println!("    • {:<60} {}", display_path(item.path()), format_bytes(item.size));
+                    println!("    • {:<60} {}", item_display(item), format_bytes(item.size));
                 } else {
-                    println!("    • {}", display_path(item.path()));
+                    println!("    • {}", item_display(item));
                 }
             }
         }

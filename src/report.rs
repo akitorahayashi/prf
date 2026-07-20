@@ -1,7 +1,12 @@
+//! Scan aggregation model shared by the `app` and `output` layers.
+//!
+//! Owned by neither layer: `app` produces a `ScanReport` and `output` renders it, so the
+//! model lives in a neutral leaf module both depend on, keeping the layer graph acyclic.
+
 use std::collections::BTreeMap;
 
-use super::category::Category;
-use super::item::CleanupItem;
+use crate::targets::category::Category;
+use crate::targets::item::CleanupItem;
 
 #[derive(Debug, Clone)]
 pub struct CategoryReport {
@@ -33,11 +38,11 @@ impl ScanReport {
         Self { categories: BTreeMap::new() }
     }
 
-    pub fn add_items(&mut self, category: Category, mut items: Vec<CleanupItem>) {
-        debug_assert!(items.iter().all(|item| item.category == category));
+    pub fn add_item(&mut self, item: CleanupItem) {
+        let category = item.category;
         let entry =
             self.categories.entry(category).or_insert_with(|| CategoryReport::new(category));
-        entry.items.append(&mut items);
+        entry.items.push(item);
     }
 
     pub fn total_size(&self) -> u64 {

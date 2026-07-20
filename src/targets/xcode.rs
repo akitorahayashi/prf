@@ -7,7 +7,7 @@ use walkdir::WalkDir;
 use crate::error::AppError;
 
 use super::category::Category;
-use super::item::{CleanupItem, ItemKind};
+use super::item::CleanupItem;
 use super::target::{CleanupTarget, ScanScope};
 
 pub struct XcodeTarget {
@@ -36,13 +36,12 @@ impl XcodeTarget {
     }
 
     fn add_path(&self, path: &Path, items: &mut Vec<CleanupItem>) {
-        let kind = if path.is_file() { ItemKind::File } else { ItemKind::Directory };
-        items.push(CleanupItem {
-            category: Category::Xcode,
-            path: path.to_path_buf(),
-            size: 0,
-            kind,
-        });
+        let item = if path.is_file() {
+            CleanupItem::file(Category::Xcode, path.to_path_buf(), 0)
+        } else {
+            CleanupItem::directory(Category::Xcode, path.to_path_buf(), 0)
+        };
+        items.push(item);
     }
 
     fn collect_swiftpm_artifacts(&self, parent: &Path, items: &mut Vec<CleanupItem>) {
@@ -202,6 +201,17 @@ mod tests {
     use std::env;
 
     use super::*;
+    use crate::targets::item::CleanupAction;
+
+    fn item_paths(items: &[CleanupItem]) -> Vec<String> {
+        items
+            .iter()
+            .filter_map(|item| match &item.action {
+                CleanupAction::Path { path, .. } => Some(path.to_string_lossy().into_owned()),
+                CleanupAction::DockerPrune => None,
+            })
+            .collect()
+    }
 
     struct HomeGuard {
         original_home: Option<String>,
@@ -245,7 +255,7 @@ mod tests {
         let items = target.discover(&scope).expect("scan succeeds");
 
         assert!(
-            items.iter().any(|item| item.path.ends_with("DerivedData")),
+            item_paths(&items).iter().any(|path| path.ends_with("DerivedData")),
             "expected DerivedData directory to be reported"
         );
     }
@@ -271,27 +281,21 @@ mod tests {
         let scope = ScanScope::new(vec![roots.path().to_path_buf()], false, true);
         let items = target.discover(&scope).expect("scan succeeds");
 
+        let paths = item_paths(&items);
         assert!(
-            items.iter().any(|item| item.path.to_string_lossy().contains("AppWithPackage/.build")),
+            paths.iter().any(|path| path.contains("AppWithPackage/.build")),
             ".build directory should be reported when Package.swift exists"
         );
         assert!(
-            items
-                .iter()
-                .any(|item| item.path.to_string_lossy().contains("AppWithPackage/.swiftpm")),
+            paths.iter().any(|path| path.contains("AppWithPackage/.swiftpm")),
             ".swiftpm directory should be reported when Package.swift exists"
         );
         assert!(
-            !items.iter().any(|item| item
-                .path
-                .to_string_lossy()
-                .contains("AppWithPackage/Package.resolved")),
+            !paths.iter().any(|path| path.contains("AppWithPackage/Package.resolved")),
             "Package.resolved should not be reported even if Package.swift exists"
         );
         assert!(
-            !items
-                .iter()
-                .any(|item| item.path.to_string_lossy().contains("AppWithoutPackage/.build")),
+            !paths.iter().any(|path| path.contains("AppWithoutPackage/.build")),
             "projects without Package.swift should be ignored"
         );
     }
@@ -310,10 +314,9 @@ mod tests {
         let target = XcodeTarget::new(false);
         let items = target.discover(&scope).expect("scan succeeds");
         assert!(
-            items.iter().any(|item| item
-                .path
-                .to_string_lossy()
-                .contains("Library/Developer/Xcode/DerivedData")),
+            item_paths(&items)
+                .iter()
+                .any(|path| path.contains("Library/Developer/Xcode/DerivedData")),
             "global caches should be detected when not in current-only mode"
         );
 
