@@ -1,11 +1,14 @@
 use super::brew::BrewTarget;
 use super::category::Category;
 use super::docker::DockerTarget;
-use super::nodejs::NodejsTarget;
-use super::python::PythonTarget;
+use super::name_matcher::NameMatcherTarget;
 use super::rust::RustTarget;
 use super::target::CleanupTarget;
 use super::xcode::XcodeTarget;
+
+const PYTHON_TARGETS: &[&str] =
+    &["__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".venv"];
+const NODEJS_TARGETS: &[&str] = &["node_modules", ".next", ".nuxt", ".svelte-kit"];
 
 const CATEGORY_ORDER: [Category; 6] = [
     Category::Xcode,
@@ -75,9 +78,13 @@ pub fn build_targets(categories: &[Category], current: bool) -> Vec<Box<dyn Clea
 
         match category {
             Category::Xcode => targets.push(Box::new(XcodeTarget::new(current))),
-            Category::Python => targets.push(Box::new(PythonTarget::new())),
+            Category::Python => {
+                targets.push(Box::new(NameMatcherTarget::new(Category::Python, PYTHON_TARGETS)))
+            }
             Category::Rust => targets.push(Box::new(RustTarget::new())),
-            Category::Nodejs => targets.push(Box::new(NodejsTarget::new())),
+            Category::Nodejs => {
+                targets.push(Box::new(NameMatcherTarget::new(Category::Nodejs, NODEJS_TARGETS)))
+            }
             Category::Brew => targets.push(Box::new(BrewTarget::new())),
             Category::Docker => targets.push(Box::new(DockerTarget::new())),
         }

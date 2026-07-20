@@ -8,7 +8,12 @@ use crate::error::AppError;
 
 use super::category::Category;
 use super::item::CleanupItem;
-use super::target::{CleanupTarget, ScanScope};
+use super::target::{CleanupTarget, MAX_SCAN_DEPTH, ScanScope};
+
+enum LocalMatch {
+    DerivedData(PathBuf),
+    SwiftPackage(PathBuf),
+}
 
 pub struct XcodeTarget {
     current: bool,
@@ -64,8 +69,10 @@ impl XcodeTarget {
         items
     }
 
-    fn scan_local_projects(&self, scope: &ScanScope) -> Vec<CleanupItem> {
-        let mut items = Vec::new();
+    /// Single local traversal shared by discovery and listing. Yields each DerivedData
+    /// directory and each SwiftPM package root (deduplicated), so both consumers see the
+    /// same matches without walking the tree twice.
+    fn for_each_local_match<F: FnMut(LocalMatch)>(&self, scope: &ScanScope, mut visit: F) {
         let mut processed_packages: HashSet<PathBuf> = HashSet::new();
 
         for root in scope.roots() {
@@ -73,7 +80,7 @@ impl XcodeTarget {
                 continue;
             }
 
-            let mut walker = WalkDir::new(root).max_depth(10).into_iter();
+            let mut walker = WalkDir::new(root).max_depth(MAX_SCAN_DEPTH).into_iter();
             while let Some(entry) = walker.next() {
                 let entry = match entry {
                     Ok(entry) => entry,
@@ -89,7 +96,7 @@ impl XcodeTarget {
                 let file_name = entry.file_name().to_string_lossy();
 
                 if entry.file_type().is_dir() && file_name == "DerivedData" {
-                    self.add_path(path, &mut items);
+                    visit(LocalMatch::DerivedData(path.to_path_buf()));
                     walker.skip_current_dir();
                     continue;
                 }
@@ -99,11 +106,18 @@ impl XcodeTarget {
                     && let Some(parent) = path.parent()
                     && processed_packages.insert(parent.to_path_buf())
                 {
-                    self.collect_swiftpm_artifacts(parent, &mut items);
+                    visit(LocalMatch::SwiftPackage(parent.to_path_buf()));
                 }
             }
         }
+    }
 
+    fn scan_local_projects(&self, scope: &ScanScope) -> Vec<CleanupItem> {
+        let mut items = Vec::new();
+        self.for_each_local_match(scope, |matched| match matched {
+            LocalMatch::DerivedData(path) => self.add_path(&path, &mut items),
+            LocalMatch::SwiftPackage(parent) => self.collect_swiftpm_artifacts(&parent, &mut items),
+        });
         items
     }
 
@@ -122,32 +136,10 @@ impl XcodeTarget {
         let mut derived_data = 0usize;
         let mut swiftpm_projects = 0usize;
 
-        for root in scope.roots() {
-            if !root.exists() {
-                continue;
-            }
-
-            let mut walker = WalkDir::new(root).max_depth(10).into_iter();
-            while let Some(entry) = walker.next() {
-                let entry = match entry {
-                    Ok(entry) => entry,
-                    Err(err) => {
-                        if scope.verbose() {
-                            eprintln!("Skipping {:?}: {}", err.path(), err);
-                        }
-                        continue;
-                    }
-                };
-
-                let file_name = entry.file_name().to_string_lossy();
-                if entry.file_type().is_dir() && file_name == "DerivedData" {
-                    derived_data += 1;
-                    walker.skip_current_dir();
-                } else if entry.file_type().is_file() && file_name == "Package.swift" {
-                    swiftpm_projects += 1;
-                }
-            }
-        }
+        self.for_each_local_match(scope, |matched| match matched {
+            LocalMatch::DerivedData(_) => derived_data += 1,
+            LocalMatch::SwiftPackage(_) => swiftpm_projects += 1,
+        });
 
         if derived_data > 0 {
             targets.push(format!(

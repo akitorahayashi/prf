@@ -43,8 +43,6 @@ src/
 │   ├── item.rs
 │   ├── target.rs
 │   ├── name_matcher.rs
-│   ├── python.rs
-│   ├── nodejs.rs
 │   ├── rust.rs
 │   ├── xcode.rs
 │   ├── brew.rs

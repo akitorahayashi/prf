@@ -5,6 +5,9 @@ use crate::error::AppError;
 use super::category::Category;
 use super::item::CleanupItem;
 
+/// Maximum directory depth walked when discovering cleanup targets under a scan root.
+pub const MAX_SCAN_DEPTH: usize = 10;
+
 #[derive(Debug, Clone)]
 pub struct ScanScope {
     roots: Vec<PathBuf>,
