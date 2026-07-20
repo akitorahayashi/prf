@@ -14,7 +14,8 @@ is supplied.
 cargo install --path .
 ```
 
-The release binary will be available at `target/release/prf`.
+`cargo install --path .` places the `prf` binary on your PATH (under `~/.cargo/bin`). To build the
+release binary in-tree instead, run `just build-release`, which produces `target/release/prf`.
 
 ### Verification
 
@@ -38,7 +39,7 @@ prf scan --type python -v       # Show detailed Python cleanup targets
 | Category  | Description |
 |-----------|-------------|
 | `xcode`   | Project-local Xcode/Swift caches and, outside `--current`, vetted global Xcode and SwiftPM caches. |
-| `python`  | Python caches such as `__pycache__`, `.pytest_cache`, `.ruff_cache`, `.mypy_cache`, `.venv`, and `.uv-cache`. |
+| `python`  | Python caches such as `__pycache__`, `.pytest_cache`, `.ruff_cache`, `.mypy_cache`, and `.venv`. |
 | `rust`    | Rust build artifacts in `target` directories. |
 | `nodejs`  | NodeJS artifacts including `node_modules`, `.next`, `.nuxt`, and `.svelte-kit`. |
 | `brew`    | Homebrew caches and build artifacts. Skipped in `--current` mode. |

@@ -61,9 +61,18 @@ src/
     └── prompt.rs
 
 tests/
-├── scan.rs
-├── run.rs
-└── aliases.rs
+├── cli.rs
+├── cli/
+│   ├── mod.rs
+│   ├── aliases.rs
+│   ├── help_and_version.rs
+│   ├── run.rs
+│   └── scan.rs
+├── harness/
+│   ├── mod.rs
+│   └── test_context.rs
+├── runtime.rs
+└── safety.rs
 ```
 
 ## Execution Model

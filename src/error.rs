@@ -2,7 +2,7 @@ use std::io;
 
 use thiserror::Error;
 
-/// Application-wide error type for the prf CLI (purify).
+/// Application-wide error type for the prf CLI.
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error("I/O error: {0}")]

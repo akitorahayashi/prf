@@ -28,14 +28,14 @@ enum Commands {
     Run(run::RunArgs),
 }
 
-pub fn run() {
-    if let Err(err) = run_inner() {
+pub fn execute() {
+    if let Err(err) = try_execute() {
         eprintln!("Error: {}", err);
         std::process::exit(1);
     }
 }
 
-fn run_inner() -> Result<(), AppError> {
+fn try_execute() -> Result<(), AppError> {
     let cli = Cli::parse();
 
     match cli.command {

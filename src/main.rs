@@ -1,3 +1,3 @@
 fn main() {
-    prf::cli();
+    prf::cli::execute();
 }
