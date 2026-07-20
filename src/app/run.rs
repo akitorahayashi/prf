@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use indicatif::{MultiProgress, ProgressBar};
 use rayon::prelude::*;
@@ -90,15 +91,15 @@ pub fn execute(options: RunOptions) -> Result<(), AppError> {
     let docker_result =
         if docker_selected { run_docker_cleanup_with_handling(options.verbose) } else { Ok(()) };
 
-    match (fs_result, docker_result) {
-        (Ok(()), Ok(())) => {}
-        (Err(err), Ok(())) | (Ok(()), Err(err)) => return Err(err),
+    let fs_summary = match (fs_result, docker_result) {
+        (Ok(summary), Ok(())) => summary,
+        (Err(err), Ok(())) | (Ok(_), Err(err)) => return Err(err),
         (Err(fs_err), Err(docker_err)) => {
             return Err(AppError::Io(io::Error::other(format!(
                 "multiple cleanup failures: filesystem: {fs_err}; docker: {docker_err}"
             ))));
         }
-    }
+    };
 
     if debug_logging {
         eprintln!("[prf::run] deletion phase complete");
@@ -109,6 +110,12 @@ pub fn execute(options: RunOptions) -> Result<(), AppError> {
         format_bytes(subset.total_size()),
         selected_categories.len()
     );
+    if fs_summary.skipped > 0 {
+        println!(
+            "{} director(ies) could not be removed because they were not empty after cleanup.",
+            fs_summary.skipped
+        );
+    }
 
     Ok(())
 }
@@ -139,11 +146,24 @@ struct FsDeletion {
     kind: ItemKind,
 }
 
+pub struct DeletionSummary {
+    pub deleted: usize,
+    pub skipped: usize,
+}
+
+fn is_strict_descendant(child: &Path, ancestor: &Path) -> bool {
+    child != ancestor && child.starts_with(ancestor)
+}
+
 fn delete_items(
     items: &[CleanupItem],
     progress: &Arc<MultiProgress>,
     verbose: bool,
-) -> Result<(), AppError> {
+) -> Result<DeletionSummary, AppError> {
+    // Canonicalize and collapse duplicates. A path that is a strict descendant of another
+    // prepared path is subsumed by that ancestor's recursive deletion, so it is dropped here:
+    // this removes all nesting up front, which is what makes the parallel deletion below
+    // race-free (no depth ordering required).
     let mut prepared: Vec<FsDeletion> = Vec::new();
     let mut seen_paths: HashMap<String, usize> = HashMap::new();
 
@@ -166,24 +186,30 @@ fn delete_items(
         prepared.push(FsDeletion { path: canonicalized, kind: *kind });
     }
 
-    if prepared.is_empty() {
-        return Ok(());
+    let roots: Vec<&FsDeletion> = prepared
+        .iter()
+        .filter(|candidate| {
+            !prepared.iter().any(|other| is_strict_descendant(&candidate.path, &other.path))
+        })
+        .collect();
+
+    if roots.is_empty() {
+        return Ok(DeletionSummary { deleted: 0, skipped: 0 });
     }
 
-    prepared.sort_by_key(|deletion| std::cmp::Reverse(deletion.path.components().count()));
-
-    let pb = progress.add(ProgressBar::new(prepared.len() as u64));
+    let pb = progress.add(ProgressBar::new(roots.len() as u64));
     pb.set_style(deletion_progress_style());
 
-    prepared.par_iter().try_for_each(|deletion| {
-        remove_item(&deletion.path, deletion.kind, verbose)?;
+    let skipped = AtomicUsize::new(0);
+    roots.par_iter().try_for_each(|deletion| {
+        skipped.fetch_add(remove_item(&deletion.path, deletion.kind, verbose)?, Ordering::Relaxed);
         pb.inc(1);
         Ok::<(), AppError>(())
     })?;
 
     pb.finish_and_clear();
-    let _ = progress.println(format!("{}/{} Deletion complete", prepared.len(), prepared.len()));
-    Ok(())
+    let _ = progress.println(format!("{}/{} Deletion complete", roots.len(), roots.len()));
+    Ok(DeletionSummary { deleted: roots.len(), skipped: skipped.load(Ordering::Relaxed) })
 }
 
 #[cfg(test)]
@@ -238,5 +264,30 @@ mod tests {
 
         dir.assert(predicates::path::missing());
         file.assert(predicates::path::missing());
+    }
+
+    #[test]
+    fn delete_items_prunes_nested_child_of_selected_parent() {
+        let temp = TempDir::new().expect("temp directory is created");
+        let node_modules = temp.child("node_modules");
+        node_modules.create_dir_all().expect("node_modules exists");
+        let nested_pycache = node_modules.child("pkg/__pycache__");
+        nested_pycache.create_dir_all().expect("nested pycache exists");
+        nested_pycache.child("foo.pyc").write_str("cache").expect("cache file exists");
+
+        // A python item nested inside a selected nodejs item: the parent's recursive
+        // deletion subsumes the child, so only one deletion is attempted for the subtree.
+        let items = vec![
+            CleanupItem::directory(Category::Nodejs, node_modules.path().to_path_buf(), 0),
+            CleanupItem::directory(Category::Python, nested_pycache.path().to_path_buf(), 0),
+        ];
+
+        let progress = Arc::new(MultiProgress::new());
+        let summary = delete_items(&items, &progress, false).expect("deletion succeeds");
+
+        node_modules.assert(predicates::path::missing());
+        nested_pycache.assert(predicates::path::missing());
+        assert_eq!(summary.deleted, 1, "nested child is subsumed by the parent deletion");
+        assert_eq!(summary.skipped, 0, "no directory should be left behind");
     }
 }

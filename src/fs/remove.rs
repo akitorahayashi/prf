@@ -7,18 +7,21 @@ use walkdir::WalkDir;
 use crate::error::AppError;
 use crate::targets::item::ItemKind;
 
-pub fn remove_item(path: &Path, kind: ItemKind, verbose: bool) -> Result<(), AppError> {
+/// Removes a filesystem item, returning the number of directories that could not be
+/// removed because they were not empty after the cleanup pass (a non-fatal skip that
+/// callers surface rather than swallow).
+pub fn remove_item(path: &Path, kind: ItemKind, verbose: bool) -> Result<usize, AppError> {
     match kind {
         ItemKind::Directory => safe_remove_dir_all(path, verbose),
         ItemKind::File => match fs::remove_file(path) {
-            Ok(()) => Ok(()),
-            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+            Ok(()) => Ok(0),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(0),
             Err(err) => Err(AppError::Io(err)),
         },
     }
 }
 
-pub fn safe_remove_dir_all(path: &Path, verbose: bool) -> Result<(), AppError> {
+pub fn safe_remove_dir_all(path: &Path, verbose: bool) -> Result<usize, AppError> {
     let mut files_to_remove = Vec::new();
     let mut dirs_to_remove = Vec::new();
 
@@ -49,11 +52,13 @@ pub fn safe_remove_dir_all(path: &Path, verbose: bool) -> Result<(), AppError> {
     }
 
     dirs_to_remove.sort_by_key(|(depth, _)| std::cmp::Reverse(*depth));
+    let mut skipped = 0usize;
     for (_, dir) in &dirs_to_remove {
         match fs::remove_dir(dir) {
             Ok(()) => {}
             Err(err) if err.kind() == io::ErrorKind::NotFound => {}
             Err(err) if err.kind() == io::ErrorKind::DirectoryNotEmpty => {
+                skipped += 1;
                 if verbose {
                     eprintln!(
                         "Directory not empty after cleanup pass, skipping: {}",
@@ -65,5 +70,5 @@ pub fn safe_remove_dir_all(path: &Path, verbose: bool) -> Result<(), AppError> {
         }
     }
 
-    Ok(())
+    Ok(skipped)
 }
