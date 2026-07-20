@@ -15,7 +15,7 @@ fn run_type_nodejs_yes_deletes_directories() {
         .arg(ctx.home())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Attempted to delete"));
+        .stdout(predicate::str::contains("Reclaimed"));
 
     assert!(!cache_dir.exists(), "cache directory should be deleted");
 }
@@ -50,7 +50,7 @@ exit 0
         .arg("-y")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Attempted to delete"));
+        .stdout(predicate::str::contains("Reclaimed"));
 
     let recorded =
         std::fs::read_to_string(&marker).expect("docker system prune should have been invoked");
@@ -74,7 +74,7 @@ fn run_interactive_accepts_selection() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Deletion plan"))
-        .stdout(predicate::str::contains("Attempted to delete"));
+        .stdout(predicate::str::contains("Reclaimed"));
 
     assert!(!cache_dir.exists(), "cache directory should be deleted");
 }

@@ -9,10 +9,9 @@ use rayon::prelude::*;
 
 use crate::error::AppError;
 use crate::fs::remove::remove_item;
-use crate::output::bytes::format_bytes;
 use crate::output::progress::deletion_progress_style;
 use crate::output::prompt::{confirm_deletion, prompt_for_categories};
-use crate::output::report::print_deletion_plan;
+use crate::output::report::{deletion_summary, print_deletion_plan};
 use crate::report::ScanReport;
 use crate::targets::category::Category;
 use crate::targets::docker;
@@ -105,17 +104,18 @@ pub fn execute(options: RunOptions) -> Result<(), AppError> {
         eprintln!("[prf::run] deletion phase complete");
     }
 
+    let docker_items = subset.report_for(Category::Docker).map_or(0, |report| report.items.len());
+    let deleted_items = fs_summary.deleted + docker_items;
+    let categories_with_items = subset.categories().len();
     println!(
-        "Attempted to delete {} across {} categor(ies).",
-        format_bytes(subset.total_size()),
-        selected_categories.len()
+        "{}",
+        deletion_summary(
+            subset.total_size(),
+            deleted_items,
+            fs_summary.skipped,
+            categories_with_items
+        )
     );
-    if fs_summary.skipped > 0 {
-        println!(
-            "{} director(ies) could not be removed because they were not empty after cleanup.",
-            fs_summary.skipped
-        );
-    }
 
     Ok(())
 }
@@ -146,9 +146,9 @@ struct FsDeletion {
     kind: ItemKind,
 }
 
-pub struct DeletionSummary {
-    pub deleted: usize,
-    pub skipped: usize,
+struct DeletionSummary {
+    deleted: usize,
+    skipped: usize,
 }
 
 fn is_strict_descendant(child: &Path, ancestor: &Path) -> bool {
