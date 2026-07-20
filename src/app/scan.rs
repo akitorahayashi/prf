@@ -20,23 +20,31 @@ pub struct ScanOptions {
     pub categories: Vec<Category>,
     pub roots: Vec<PathBuf>,
     pub verbose: bool,
-    pub list: bool,
     pub current: bool,
 }
 
 pub fn execute(options: ScanOptions) -> Result<ScanReport, AppError> {
     let scope = ScanScope::new(options.roots, options.current, options.verbose);
-
-    if options.list {
-        let list_results = list_targets(&options.categories, &scope)?;
-        print_list_results(&list_results);
-        return Ok(ScanReport::new());
-    }
-
     let progress = Arc::new(MultiProgress::new());
     let report = scan_categories(&options.categories, &scope, &progress)?;
     print_scan_report(&report, &options.categories, options.verbose);
     Ok(report)
+}
+
+pub fn list_targets(options: ScanOptions) -> Result<(), AppError> {
+    let scope = ScanScope::new(options.roots, options.current, options.verbose);
+    let targets = catalog::build_targets(&options.categories, scope.current());
+
+    let listings: Result<Vec<(Category, Vec<String>)>, AppError> =
+        targets.par_iter().map(|target| Ok((target.category(), target.list(&scope)?))).collect();
+
+    let mut result_map = BTreeMap::new();
+    for (category, entries) in listings? {
+        result_map.insert(category, entries);
+    }
+
+    print_list_results(&result_map);
+    Ok(())
 }
 
 pub fn scan_categories(
@@ -107,31 +115,6 @@ pub fn scan_categories(
     }
 
     Ok(report)
-}
-
-fn list_targets(
-    categories: &[Category],
-    scope: &ScanScope,
-) -> Result<BTreeMap<Category, Vec<String>>, AppError> {
-    let targets = catalog::build_targets(categories, scope.current());
-    if targets.is_empty() {
-        return Ok(BTreeMap::new());
-    }
-
-    let results: Result<Vec<_>, AppError> = targets
-        .par_iter()
-        .map(|target| {
-            let list = target.list(scope)?;
-            Ok((target.category(), list))
-        })
-        .collect();
-
-    let mut result_map = BTreeMap::new();
-    for (category, targets) in results? {
-        result_map.insert(category, targets);
-    }
-
-    Ok(result_map)
 }
 
 fn compute_sizes_parallel(

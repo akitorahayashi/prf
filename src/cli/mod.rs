@@ -45,10 +45,13 @@ fn try_execute() -> Result<(), AppError> {
                 categories,
                 roots: resolve_roots_with_current(&args.paths, args.current)?,
                 verbose: args.verbose,
-                list: args.list,
                 current: args.current,
             };
-            app::scan::execute(options)?;
+            if args.list {
+                app::scan::list_targets(options)?;
+            } else {
+                app::scan::execute(options)?;
+            }
         }
         Commands::Run(args) => {
             let interactive = args.interactive();
