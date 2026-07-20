@@ -26,35 +26,6 @@ fn item_display(item: &CleanupItem) -> String {
     }
 }
 
-fn plural<'a>(count: usize, singular: &'a str, plural: &'a str) -> &'a str {
-    if count == 1 { singular } else { plural }
-}
-
-pub fn deletion_summary(
-    freed: u64,
-    deleted_items: usize,
-    skipped: usize,
-    categories: usize,
-) -> String {
-    let mut summary = format!(
-        "Reclaimed {} across {} {}: {} {} removed",
-        format_bytes(freed),
-        categories,
-        plural(categories, "category", "categories"),
-        deleted_items,
-        plural(deleted_items, "item", "items"),
-    );
-    if skipped > 0 {
-        summary.push_str(&format!(
-            ", {} {} skipped (not empty after cleanup)",
-            skipped,
-            plural(skipped, "directory", "directories"),
-        ));
-    }
-    summary.push('.');
-    summary
-}
-
 pub fn print_scan_report(report: &ScanReport, categories: &[Category], verbose: bool) {
     println!("Scan results:");
     for category in categories {

@@ -8,6 +8,7 @@ use rayon::prelude::*;
 
 use crate::error::AppError;
 use crate::fs::size::path_size;
+use crate::output::messages;
 use crate::output::progress::{discovery_spinner_style, size_progress_style};
 use crate::output::report::{print_list_results, print_scan_report};
 use crate::report::ScanReport;
@@ -72,20 +73,13 @@ pub fn scan_categories(
             let spinner = discovery_progress.add(ProgressBar::new_spinner());
             spinner.set_style((*discovery_style).clone());
             spinner.enable_steady_tick(Duration::from_millis(100));
-            spinner.set_message(format!(
-                "Discovering targets... ({})",
-                target.category().display_name()
-            ));
+            spinner.set_message(messages::discovering(target.category()));
 
             let items = target.discover(scope)?;
             let count = items.len();
             spinner.finish_and_clear();
-            let _ = discovery_progress.println(format!(
-                "✔︎ {} discovery complete ({} item{})",
-                target.category().display_name(),
-                count,
-                if count == 1 { "" } else { "s" }
-            ));
+            let _ =
+                discovery_progress.println(messages::discovery_complete(target.category(), count));
             Ok(items)
         })
         .collect();
@@ -101,13 +95,7 @@ pub fn scan_categories(
     compute_sizes_parallel(&mut discovered_items, scope.verbose(), Some(&size_bar));
     size_bar.finish_and_clear();
 
-    let _ = progress.println(format!(
-        "{}/{} Size calculation complete ({} item{})",
-        total_items,
-        total_items,
-        total_items,
-        if total_items == 1 { "" } else { "s" }
-    ));
+    let _ = progress.println(messages::size_calculation_complete(total_items));
 
     let mut report = ScanReport::new();
     for item in discovered_items {

@@ -9,9 +9,10 @@ use rayon::prelude::*;
 
 use crate::error::AppError;
 use crate::fs::remove::remove_item;
+use crate::output::messages;
 use crate::output::progress::deletion_progress_style;
 use crate::output::prompt::{confirm_deletion, prompt_for_categories};
-use crate::output::report::{deletion_summary, print_deletion_plan};
+use crate::output::report::print_deletion_plan;
 use crate::report::ScanReport;
 use crate::targets::category::Category;
 use crate::targets::docker;
@@ -30,20 +31,14 @@ pub struct RunOptions {
 }
 
 pub fn execute(options: RunOptions) -> Result<(), AppError> {
-    let debug_logging = std::env::var_os("PRF_DEBUG").is_some();
-
     let scope = ScanScope::new(options.roots, options.current, options.verbose);
     let progress = Arc::new(MultiProgress::new());
     let report = scan_categories(&options.categories, &scope, &progress)?;
 
-    if debug_logging {
-        eprintln!("[prf::run] finished scan phase");
-    }
-
     // catalog::resolve excludes Docker under --current, so the membership check is sufficient.
     let docker_requested_initially = options.categories.contains(&Category::Docker);
     if report.total_size() == 0 && !docker_requested_initially {
-        println!("Nothing to delete. All selected categories are already clean.");
+        println!("{}", messages::nothing_to_delete());
         return Ok(());
     }
 
@@ -51,7 +46,7 @@ pub fn execute(options: RunOptions) -> Result<(), AppError> {
         match prompt_for_categories(&report, &options.categories) {
             Ok(categories) => categories,
             Err(AppError::Cancelled) => {
-                println!("Aborted. No files were deleted.");
+                println!("{}", messages::aborted());
                 return Ok(());
             }
             Err(err) => return Err(err),
@@ -63,23 +58,15 @@ pub fn execute(options: RunOptions) -> Result<(), AppError> {
     let docker_selected = selected_categories.contains(&Category::Docker);
     let subset = report.subset(&selected_categories);
     if subset.total_size() == 0 && !docker_selected {
-        println!("Nothing to delete. All selected categories are already clean.");
+        println!("{}", messages::nothing_to_delete());
         return Ok(());
     }
 
     print_deletion_plan(&subset, &selected_categories, options.verbose);
 
-    if debug_logging {
-        eprintln!("[prf::run] printed summary, awaiting confirmation");
-    }
-
     if !options.assume_yes && !confirm_deletion(subset.total_size())? {
-        println!("Aborted. No files were deleted.");
+        println!("{}", messages::aborted());
         return Ok(());
-    }
-
-    if debug_logging {
-        eprintln!("[prf::run] confirmation obtained");
     }
 
     // The typed action carries the filesystem/command distinction: delete_items only ever
@@ -100,16 +87,12 @@ pub fn execute(options: RunOptions) -> Result<(), AppError> {
         }
     };
 
-    if debug_logging {
-        eprintln!("[prf::run] deletion phase complete");
-    }
-
     let docker_items = subset.report_for(Category::Docker).map_or(0, |report| report.items.len());
     let deleted_items = fs_summary.deleted + docker_items;
     let categories_with_items = subset.categories().len();
     println!(
         "{}",
-        deletion_summary(
+        messages::deletion_summary(
             subset.total_size(),
             deleted_items,
             fs_summary.skipped,
@@ -208,7 +191,7 @@ fn delete_items(
     })?;
 
     pb.finish_and_clear();
-    let _ = progress.println(format!("{}/{} Deletion complete", roots.len(), roots.len()));
+    let _ = progress.println(messages::deletion_complete(roots.len()));
     Ok(DeletionSummary { deleted: roots.len(), skipped: skipped.load(Ordering::Relaxed) })
 }
 
