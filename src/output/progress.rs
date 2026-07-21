@@ -15,5 +15,5 @@ pub fn deletion_progress_style() -> ProgressStyle {
 fn shared_progress_style() -> ProgressStyle {
     ProgressStyle::with_template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>6}/{len:>6}")
         .unwrap()
-        .progress_chars("=|-")
+        .progress_chars("=>-")
 }
