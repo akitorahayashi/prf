@@ -222,11 +222,19 @@ fn delete_items(
 mod tests {
     use assert_fs::TempDir;
     use assert_fs::prelude::*;
+    use indicatif::ProgressDrawTarget;
 
     use crate::targets::category::Category;
     use crate::targets::item::CleanupItem;
 
     use super::*;
+
+    // The progress bar is an incidental dependency of delete_items, not the behavior under
+    // test. A hidden draw target keeps its rendering and completion line off stderr so test
+    // runs in a TTY do not leak progress frames.
+    fn hidden_progress() -> Arc<MultiProgress> {
+        Arc::new(MultiProgress::with_draw_target(ProgressDrawTarget::hidden()))
+    }
 
     #[test]
     fn delete_items_removes_files_and_directories() {
@@ -242,7 +250,7 @@ mod tests {
             CleanupItem::file(Category::Nodejs, file.path().to_path_buf(), 0),
         ];
 
-        let progress = Arc::new(MultiProgress::new());
+        let progress = hidden_progress();
         delete_items(&items, &progress, false).expect("deletion succeeds");
 
         dir.assert(predicates::path::missing());
@@ -265,7 +273,7 @@ mod tests {
 
         std::fs::remove_file(file.path()).expect("pre-delete file");
 
-        let progress = Arc::new(MultiProgress::new());
+        let progress = hidden_progress();
         delete_items(&items, &progress, false).expect("deletion succeeds even with missing item");
 
         dir.assert(predicates::path::missing());
@@ -288,7 +296,7 @@ mod tests {
             CleanupItem::directory(Category::Python, nested_pycache.path().to_path_buf(), 0),
         ];
 
-        let progress = Arc::new(MultiProgress::new());
+        let progress = hidden_progress();
         let summary = delete_items(&items, &progress, false).expect("deletion succeeds");
 
         node_modules.assert(predicates::path::missing());
