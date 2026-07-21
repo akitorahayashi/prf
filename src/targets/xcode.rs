@@ -7,8 +7,13 @@ use walkdir::WalkDir;
 use crate::error::AppError;
 
 use super::category::Category;
-use super::item::{CleanupItem, ItemKind};
-use super::target::{CleanupTarget, ScanScope};
+use super::item::CleanupItem;
+use super::target::{CleanupTarget, MAX_SCAN_DEPTH, ScanScope};
+
+enum LocalMatch {
+    DerivedData(PathBuf),
+    SwiftPackage(PathBuf),
+}
 
 pub struct XcodeTarget {
     current: bool,
@@ -36,13 +41,12 @@ impl XcodeTarget {
     }
 
     fn add_path(&self, path: &Path, items: &mut Vec<CleanupItem>) {
-        let kind = if path.is_file() { ItemKind::File } else { ItemKind::Directory };
-        items.push(CleanupItem {
-            category: Category::Xcode,
-            path: path.to_path_buf(),
-            size: 0,
-            kind,
-        });
+        let item = if path.is_file() {
+            CleanupItem::file(Category::Xcode, path.to_path_buf(), 0)
+        } else {
+            CleanupItem::directory(Category::Xcode, path.to_path_buf(), 0)
+        };
+        items.push(item);
     }
 
     fn collect_swiftpm_artifacts(&self, parent: &Path, items: &mut Vec<CleanupItem>) {
@@ -65,8 +69,10 @@ impl XcodeTarget {
         items
     }
 
-    fn scan_local_projects(&self, scope: &ScanScope) -> Vec<CleanupItem> {
-        let mut items = Vec::new();
+    /// Single local traversal shared by discovery and listing. Yields each DerivedData
+    /// directory and each SwiftPM package root (deduplicated), so both consumers see the
+    /// same matches without walking the tree twice.
+    fn for_each_local_match<F: FnMut(LocalMatch)>(&self, scope: &ScanScope, mut visit: F) {
         let mut processed_packages: HashSet<PathBuf> = HashSet::new();
 
         for root in scope.roots() {
@@ -74,7 +80,7 @@ impl XcodeTarget {
                 continue;
             }
 
-            let mut walker = WalkDir::new(root).max_depth(10).into_iter();
+            let mut walker = WalkDir::new(root).max_depth(MAX_SCAN_DEPTH).into_iter();
             while let Some(entry) = walker.next() {
                 let entry = match entry {
                     Ok(entry) => entry,
@@ -90,7 +96,7 @@ impl XcodeTarget {
                 let file_name = entry.file_name().to_string_lossy();
 
                 if entry.file_type().is_dir() && file_name == "DerivedData" {
-                    self.add_path(path, &mut items);
+                    visit(LocalMatch::DerivedData(path.to_path_buf()));
                     walker.skip_current_dir();
                     continue;
                 }
@@ -100,11 +106,18 @@ impl XcodeTarget {
                     && let Some(parent) = path.parent()
                     && processed_packages.insert(parent.to_path_buf())
                 {
-                    self.collect_swiftpm_artifacts(parent, &mut items);
+                    visit(LocalMatch::SwiftPackage(parent.to_path_buf()));
                 }
             }
         }
+    }
 
+    fn scan_local_projects(&self, scope: &ScanScope) -> Vec<CleanupItem> {
+        let mut items = Vec::new();
+        self.for_each_local_match(scope, |matched| match matched {
+            LocalMatch::DerivedData(path) => self.add_path(&path, &mut items),
+            LocalMatch::SwiftPackage(parent) => self.collect_swiftpm_artifacts(&parent, &mut items),
+        });
         items
     }
 
@@ -123,32 +136,10 @@ impl XcodeTarget {
         let mut derived_data = 0usize;
         let mut swiftpm_projects = 0usize;
 
-        for root in scope.roots() {
-            if !root.exists() {
-                continue;
-            }
-
-            let mut walker = WalkDir::new(root).max_depth(10).into_iter();
-            while let Some(entry) = walker.next() {
-                let entry = match entry {
-                    Ok(entry) => entry,
-                    Err(err) => {
-                        if scope.verbose() {
-                            eprintln!("Skipping {:?}: {}", err.path(), err);
-                        }
-                        continue;
-                    }
-                };
-
-                let file_name = entry.file_name().to_string_lossy();
-                if entry.file_type().is_dir() && file_name == "DerivedData" {
-                    derived_data += 1;
-                    walker.skip_current_dir();
-                } else if entry.file_type().is_file() && file_name == "Package.swift" {
-                    swiftpm_projects += 1;
-                }
-            }
-        }
+        self.for_each_local_match(scope, |matched| match matched {
+            LocalMatch::DerivedData(_) => derived_data += 1,
+            LocalMatch::SwiftPackage(_) => swiftpm_projects += 1,
+        });
 
         if derived_data > 0 {
             targets.push(format!(
@@ -202,6 +193,17 @@ mod tests {
     use std::env;
 
     use super::*;
+    use crate::targets::item::CleanupAction;
+
+    fn item_paths(items: &[CleanupItem]) -> Vec<String> {
+        items
+            .iter()
+            .filter_map(|item| match &item.action {
+                CleanupAction::Path { path, .. } => Some(path.to_string_lossy().into_owned()),
+                CleanupAction::DockerPrune => None,
+            })
+            .collect()
+    }
 
     struct HomeGuard {
         original_home: Option<String>,
@@ -245,7 +247,7 @@ mod tests {
         let items = target.discover(&scope).expect("scan succeeds");
 
         assert!(
-            items.iter().any(|item| item.path.ends_with("DerivedData")),
+            item_paths(&items).iter().any(|path| path.ends_with("DerivedData")),
             "expected DerivedData directory to be reported"
         );
     }
@@ -271,27 +273,21 @@ mod tests {
         let scope = ScanScope::new(vec![roots.path().to_path_buf()], false, true);
         let items = target.discover(&scope).expect("scan succeeds");
 
+        let paths = item_paths(&items);
         assert!(
-            items.iter().any(|item| item.path.to_string_lossy().contains("AppWithPackage/.build")),
+            paths.iter().any(|path| path.contains("AppWithPackage/.build")),
             ".build directory should be reported when Package.swift exists"
         );
         assert!(
-            items
-                .iter()
-                .any(|item| item.path.to_string_lossy().contains("AppWithPackage/.swiftpm")),
+            paths.iter().any(|path| path.contains("AppWithPackage/.swiftpm")),
             ".swiftpm directory should be reported when Package.swift exists"
         );
         assert!(
-            !items.iter().any(|item| item
-                .path
-                .to_string_lossy()
-                .contains("AppWithPackage/Package.resolved")),
+            !paths.iter().any(|path| path.contains("AppWithPackage/Package.resolved")),
             "Package.resolved should not be reported even if Package.swift exists"
         );
         assert!(
-            !items
-                .iter()
-                .any(|item| item.path.to_string_lossy().contains("AppWithoutPackage/.build")),
+            !paths.iter().any(|path| path.contains("AppWithoutPackage/.build")),
             "projects without Package.swift should be ignored"
         );
     }
@@ -310,10 +306,9 @@ mod tests {
         let target = XcodeTarget::new(false);
         let items = target.discover(&scope).expect("scan succeeds");
         assert!(
-            items.iter().any(|item| item
-                .path
-                .to_string_lossy()
-                .contains("Library/Developer/Xcode/DerivedData")),
+            item_paths(&items)
+                .iter()
+                .any(|path| path.contains("Library/Developer/Xcode/DerivedData")),
             "global caches should be detected when not in current-only mode"
         );
 

@@ -1,5 +1,7 @@
 use std::fmt;
 
+use crate::error::AppError;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Category {
     Xcode,
@@ -51,10 +53,10 @@ impl Category {
 }
 
 impl std::str::FromStr for Category {
-    type Err = String;
+    type Err = AppError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Category::from_name(s).ok_or_else(|| format!("Unknown category '{s}'"))
+        Category::from_name(s).ok_or_else(|| AppError::InvalidCategory(s.to_string()))
     }
 }
 

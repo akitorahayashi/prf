@@ -1,5 +1,4 @@
 use std::io;
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
@@ -11,7 +10,6 @@ use super::category::Category;
 use super::item::CleanupItem;
 use super::target::{CleanupTarget, ScanScope};
 
-const DOCKER_SCAN_LABEL: &str = "docker:prune";
 static DOCKER_AVAILABLE: OnceLock<bool> = OnceLock::new();
 
 fn probe_docker_available() -> bool {
@@ -144,17 +142,7 @@ impl CleanupTarget for DockerTarget {
             }
         }
 
-        if total == 0 {
-            Ok(Vec::new())
-        } else {
-            // This synthetic token is routed by run orchestration as a Docker command marker,
-            // not a real filesystem path for generic remove_item/safe_remove_dir_all handling.
-            Ok(vec![CleanupItem::directory(
-                Category::Docker,
-                PathBuf::from(DOCKER_SCAN_LABEL),
-                total,
-            )])
-        }
+        if total == 0 { Ok(Vec::new()) } else { Ok(vec![CleanupItem::docker_prune(total)]) }
     }
 
     fn list(&self, _scope: &ScanScope) -> Result<Vec<String>, AppError> {

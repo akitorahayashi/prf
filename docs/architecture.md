@@ -17,6 +17,7 @@
 | Target ownership | `src/targets/` | Category model, target registry, and target-specific discovery/cleanup rules |
 | Filesystem boundary | `src/fs/` | Root resolution, size calculation, and deletion mechanics |
 | Output boundary | `src/output/` | Byte formatting, progress styles, reporting, and interactive prompts |
+| Scan model | `src/report.rs` | Category-grouped scan aggregation shared by `app` and `output`, owned by neither |
 | Error kernel | `src/error.rs` | Typed application error model |
 
 ## Package Structure
@@ -26,6 +27,7 @@ src/
 ├── main.rs
 ├── lib.rs
 ├── error.rs
+├── report.rs
 ├── cli/
 │   ├── mod.rs
 │   ├── scan.rs
@@ -39,11 +41,8 @@ src/
 │   ├── catalog.rs
 │   ├── category.rs
 │   ├── item.rs
-│   ├── report.rs
 │   ├── target.rs
 │   ├── name_matcher.rs
-│   ├── python.rs
-│   ├── nodejs.rs
 │   ├── rust.rs
 │   ├── xcode.rs
 │   ├── brew.rs
@@ -61,9 +60,18 @@ src/
     └── prompt.rs
 
 tests/
-├── scan.rs
-├── run.rs
-└── aliases.rs
+├── cli.rs
+├── cli/
+│   ├── mod.rs
+│   ├── aliases.rs
+│   ├── help_and_version.rs
+│   ├── run.rs
+│   └── scan.rs
+├── harness/
+│   ├── mod.rs
+│   └── test_context.rs
+├── runtime.rs
+└── safety.rs
 ```
 
 ## Execution Model
@@ -77,3 +85,9 @@ tests/
 - Scanning is non-destructive.
 - Deletion requires explicit confirmation unless `-y/--yes` is provided.
 - Current-directory mode excludes system-wide categories (`brew` and `docker`).
+  `Category::supports_current_mode` is the single policy source for this exclusion: `catalog::resolve`
+  enforces it as the user-facing gate that rejects unsupported categories, and `catalog::build_targets`
+  consults the same predicate when constructing targets. Orchestration does not re-derive the policy.
+- The default scan root is `~/Desktop`; when `HOME` is unset and neither an explicit path nor
+  `--current` is given, root resolution fails explicitly rather than silently falling back to the
+  current directory.

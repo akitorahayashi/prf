@@ -1,7 +1,7 @@
 # prf Development Notes
 
 ## Project Summary
-`prf` is a Rust CLI that scans and cleans macOS caches. The binary exposes three primary
+`prf` is a Rust CLI that scans and cleans macOS caches. The binary exposes two primary
 subcommands:
 - `scan`: dry-run discovery of reclaimable disk space per category.
 - `run`: deletion workflow (interactive by default, supports `--type`, `--all`, `-y`).
@@ -25,7 +25,7 @@ subcommands:
 ## Testing & Tooling
 - `cargo fmt --check`
 - `cargo clippy --all-targets --all-features -- -D warnings`
-- `RUST_TEST_THREADS=1 cargo test --all-targets --all-features`
+- `cargo test --all-targets --all-features`
 
 Integration tests in `tests/` configure `HOME` and `XDG_CONFIG_HOME` to temporary directories to
 keep the host environment untouched.

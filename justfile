@@ -35,7 +35,7 @@ coverage:
         --out Html \
         --output-dir coverage \
         --all-features \
-        --fail-under 30
+        --fail-under 80
 
 build:
     cargo build

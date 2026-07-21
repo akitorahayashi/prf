@@ -7,6 +7,9 @@ use walkdir::WalkDir;
 use crate::error::AppError;
 use crate::targets::item::ItemKind;
 
+/// Best-effort removal of a filesystem item. An already-missing path is not an error; a
+/// directory left non-empty after the cleanup pass is skipped (logged under verbose) rather
+/// than aborting, and callers determine the outcome from whether the path still exists.
 pub fn remove_item(path: &Path, kind: ItemKind, verbose: bool) -> Result<(), AppError> {
     match kind {
         ItemKind::Directory => safe_remove_dir_all(path, verbose),

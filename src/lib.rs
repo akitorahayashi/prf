@@ -1,13 +1,11 @@
-//! Library entry point for the prf CLI (purify).
+//! Library entry point for the prf CLI.
 
 pub mod app;
+pub mod cli;
 pub mod error;
 pub mod fs;
 pub mod output;
+pub mod report;
 pub mod targets;
 
-#[path = "cli/mod.rs"]
-mod cli_entry;
-
-pub use cli_entry::run as cli;
 pub use error::AppError;

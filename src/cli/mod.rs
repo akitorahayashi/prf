@@ -28,14 +28,14 @@ enum Commands {
     Run(run::RunArgs),
 }
 
-pub fn run() {
-    if let Err(err) = run_inner() {
+pub fn execute() {
+    if let Err(err) = try_execute() {
         eprintln!("Error: {}", err);
         std::process::exit(1);
     }
 }
 
-fn run_inner() -> Result<(), AppError> {
+fn try_execute() -> Result<(), AppError> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -43,12 +43,15 @@ fn run_inner() -> Result<(), AppError> {
             let categories = args.resolve_categories()?;
             let options = app::scan::ScanOptions {
                 categories,
-                roots: resolve_roots_with_current(&args.paths, args.current),
+                roots: resolve_roots_with_current(&args.paths, args.current)?,
                 verbose: args.verbose,
-                list: args.list,
                 current: args.current,
             };
-            app::scan::execute(options)?;
+            if args.list {
+                app::scan::list_targets(options)?;
+            } else {
+                app::scan::execute(options)?;
+            }
         }
         Commands::Run(args) => {
             let interactive = args.interactive();
@@ -56,7 +59,7 @@ fn run_inner() -> Result<(), AppError> {
             let options = app::run::RunOptions {
                 categories,
                 interactive,
-                roots: resolve_roots_with_current(&args.paths, args.current),
+                roots: resolve_roots_with_current(&args.paths, args.current)?,
                 verbose: args.verbose,
                 assume_yes: args.yes,
                 current: args.current,

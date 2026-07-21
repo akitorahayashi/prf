@@ -6,7 +6,7 @@ use crate::error::AppError;
 
 use super::category::Category;
 use super::item::CleanupItem;
-use super::target::{CleanupTarget, ScanScope};
+use super::target::{CleanupTarget, MAX_SCAN_DEPTH, ScanScope};
 
 pub struct RustTarget;
 
@@ -28,7 +28,7 @@ impl RustTarget {
                 continue;
             }
 
-            let mut walker = WalkDir::new(root).max_depth(10).into_iter();
+            let mut walker = WalkDir::new(root).max_depth(MAX_SCAN_DEPTH).into_iter();
             while let Some(entry) = walker.next() {
                 let entry = match entry {
                     Ok(entry) => entry,
