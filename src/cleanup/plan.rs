@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -73,44 +74,37 @@ impl RemovalCatalog {
             ));
         }
 
-        let mut selected_roots =
-            selected.iter().filter_map(|index| self.candidate_roots[*index]).collect::<Vec<_>>();
-        selected_roots.sort_unstable();
-        selected_roots.dedup();
-        let all_selected_roots = selected_roots.clone();
-        selected_roots.retain(|candidate| {
-            !all_selected_roots.iter().copied().any(|other| {
-                *candidate != other
-                    && is_strict_descendant(
-                        &self.roots[candidate.index()].path,
-                        &self.roots[other.index()].path,
-                    )
-            })
+        let mut source_by_root = vec![None; self.roots.len()];
+        for index in &selected {
+            if let Some(root) = self.candidate_roots[*index] {
+                source_by_root[root.index()].get_or_insert(*index);
+            }
+        }
+        let mut selected_roots = source_by_root
+            .iter()
+            .enumerate()
+            .filter_map(|(index, source)| source.map(|_| RootId::new(index)))
+            .collect::<Vec<_>>();
+        selected_roots.sort_unstable_by(|left, right| {
+            compare_paths(&self.roots[left.index()].path, &self.roots[right.index()].path)
         });
 
-        let paths = selected_roots
-            .into_iter()
-            .map(|root_id| {
-                let root = &self.roots[root_id.index()];
-                let candidates = selected
-                    .iter()
-                    .copied()
-                    .filter(|index| {
-                        self.candidate_roots[*index].is_some_and(|candidate_root| {
-                            let candidate_path = &self.roots[candidate_root.index()].path;
-                            candidate_path == &root.path || candidate_path.starts_with(&root.path)
-                        })
-                    })
-                    .collect::<Vec<_>>();
-                let attribution = candidates
-                    .iter()
-                    .copied()
-                    .find(|index| self.candidate_roots[*index] == Some(root_id))
-                    .expect("selected root has a source candidate");
-
-                PathRemoval { root: root_id, path: root.path.clone(), kind: root.kind, attribution }
-            })
-            .collect();
+        let mut paths: Vec<PathRemoval> = Vec::new();
+        for root_id in selected_roots {
+            let root = &self.roots[root_id.index()];
+            if paths.last().is_some_and(|ancestor| root.path.starts_with(ancestor.path())) {
+                continue;
+            }
+            let attribution = source_by_root[root_id.index()].ok_or_else(|| {
+                AppError::Cleanup("selected removal root has no source candidate".to_string())
+            })?;
+            paths.push(PathRemoval {
+                root: root_id,
+                path: root.path.clone(),
+                kind: root.kind,
+                attribution,
+            });
+        }
 
         let mut processes = Vec::new();
         for index in selected {
@@ -133,8 +127,8 @@ impl RemovalCatalog {
     }
 }
 
-fn is_strict_descendant(child: &Path, ancestor: &Path) -> bool {
-    child != ancestor && child.starts_with(ancestor)
+fn compare_paths(left: &Path, right: &Path) -> Ordering {
+    left.components().cmp(right.components())
 }
 
 fn normalize_terminal_entry(path: &Path) -> Result<PathBuf, AppError> {
@@ -340,5 +334,80 @@ mod tests {
             Err(AppError::Cleanup(message))
                 if message.contains("references an unknown candidate")
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn optimized_selection_matches_an_independent_quadratic_oracle() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new().expect("temp directory is created");
+        let parent = temp.child("a");
+        let child = parent.child("child");
+        let sibling = parent.child("sibling");
+        let adjacent = temp.child("a-neighbor");
+        let other = temp.child("z");
+        child.create_dir_all().expect("child exists");
+        sibling.create_dir_all().expect("sibling exists");
+        adjacent.create_dir_all().expect("adjacent exists");
+        other.create_dir_all().expect("other exists");
+        let alias = temp.child("alias");
+        symlink(parent.path(), alias.path()).expect("ancestor alias exists");
+        let candidates = vec![
+            Candidate::directory(TARGET, parent.path().to_path_buf()),
+            Candidate::directory(TARGET, parent.path().to_path_buf()),
+            Candidate::directory(TARGET, child.path().to_path_buf()),
+            Candidate::directory(TARGET, alias.path().join("child")),
+            Candidate::directory(TARGET, sibling.path().to_path_buf()),
+            Candidate::directory(TARGET, adjacent.path().to_path_buf()),
+            Candidate::directory(TARGET, other.path().to_path_buf()),
+        ];
+        let catalog = RemovalCatalog::new(candidates).expect("catalog is valid");
+
+        for mask in 0..(1usize << catalog.candidates.len()) {
+            let selected = (0..catalog.candidates.len())
+                .filter(|index| mask & (1 << index) != 0)
+                .collect::<Vec<_>>();
+            let plan = catalog.plan(&selected).expect("optimized plan is valid");
+            let mut selected_roots = selected
+                .iter()
+                .filter_map(|index| catalog.candidate_roots[*index])
+                .collect::<Vec<_>>();
+            selected_roots.sort_unstable();
+            selected_roots.dedup();
+            let mut expected = selected_roots
+                .iter()
+                .copied()
+                .filter(|candidate| {
+                    !selected_roots.iter().copied().any(|other| {
+                        candidate != &other
+                            && catalog.roots[candidate.index()]
+                                .path
+                                .starts_with(&catalog.roots[other.index()].path)
+                    })
+                })
+                .collect::<Vec<_>>();
+            expected.sort_unstable_by(|left, right| {
+                compare_paths(&catalog.roots[left.index()].path, &catalog.roots[right.index()].path)
+            });
+
+            assert_eq!(
+                plan.paths().iter().map(PathRemoval::root).collect::<Vec<_>>(),
+                expected,
+                "root selection differs for subset mask {mask:#09b}"
+            );
+            for removal in plan.paths() {
+                let expected_source = selected
+                    .iter()
+                    .copied()
+                    .find(|index| catalog.candidate_roots[*index] == Some(removal.root()))
+                    .expect("oracle root has a direct source");
+                assert_eq!(
+                    removal.attribution(),
+                    expected_source,
+                    "attribution differs for subset mask {mask:#09b}"
+                );
+            }
+        }
     }
 }

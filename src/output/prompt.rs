@@ -17,7 +17,7 @@ pub fn prompt_for_targets<'a>(
     )?;
 
     for (index, target) in available_targets.iter().enumerate() {
-        let size = report.estimate_for(&[target.id()])?.bytes();
+        let size = report.standalone_estimate(target.id())?.bytes();
         writeln!(output, "  [{}] {:<8} {:>10}", index + 1, target, format_bytes(size))?;
     }
 

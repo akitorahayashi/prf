@@ -112,7 +112,9 @@ The removal catalog owns the scanned candidate set, canonicalizes candidate pare
 merges physical ancestor aliases, rejects conflicting entry kinds, and retains the terminal path
 component. A removal plan selects catalog roots for a report subset and omits roots already covered
 by a selected ancestor. Plan construction accepts only candidate indices, so a different candidate
-collection cannot be paired with catalog normalization state.
+collection cannot be paired with catalog normalization state. Component-aware path sorting followed
+by one prefix pass selects maximal roots and their attribution in `O(n log n)` time including
+sorting.
 
 Footprint measurement and action application consume the same normalized entries. A terminal
 symbolic-link candidate contributes and removes only the link entry; its target is never traversed.
@@ -122,6 +124,8 @@ remains an idempotent plan root with a zero footprint.
 Application records removed, already-absent, retained, and failed outcomes without discarding
 successful mutations when another action fails. Reclaimed estimates include only completed actions.
 The outcome report is rendered before retained or failed actions cause a non-zero command result.
+Directory application streams a contents-first walk and removes entries as they are yielded, so
+memory grows with traversal depth rather than the full removal tree.
 
 ## Footprint Model
 
@@ -134,10 +138,10 @@ multiple links. A hard-linked inode contributes once when every link reported by
 belongs to the selected removal roots; a link outside the selection makes that inode contribute
 zero. Duplicate roots and selected descendants do not inflate aggregate totals.
 
-Each rendered report attributes a selected root's contribution to one deterministic source candidate,
-so candidate and target contributions sum to the report total. The interactive target menu queries
-the same index for each target as a standalone selection rather than reusing context-dependent
-contributions from the complete scan.
+Each rendered report attributes a selected root's contribution to one deterministic source
+candidate, so candidate and target contributions sum to the report total. Standalone target
+estimates are calculated once during report construction and cached for the interactive target
+menu rather than reusing context-dependent contributions from the complete scan.
 
 One bounded Rayon pool traverses maximal roots and nested directories. Ordinary entries contribute
 directly without constructing a retained file tree. The index derives estimates for target subsets,

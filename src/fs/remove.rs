@@ -37,10 +37,7 @@ pub fn safe_remove_dir_all(path: &Path) -> Result<RemovalStatus, AppError> {
         Err(source) => return Err(path_error("inspect directory", path, source)),
     }
 
-    let mut files_to_remove = Vec::new();
-    let mut dirs_to_remove = Vec::new();
-
-    for entry_result in WalkDir::new(path).into_iter() {
+    for entry_result in WalkDir::new(path).contents_first(true).into_iter() {
         let entry = match entry_result {
             Ok(entry) => entry,
             Err(error)
@@ -61,27 +58,24 @@ pub fn safe_remove_dir_all(path: &Path) -> Result<RemovalStatus, AppError> {
         };
 
         if entry.file_type().is_file() || entry.file_type().is_symlink() {
-            files_to_remove.push(entry.into_path());
+            let entry_path = entry.path();
+            match fs::remove_file(entry_path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(source) => {
+                    return Err(path_error("remove file or symbolic link", entry_path, source));
+                }
+            }
         } else if entry.file_type().is_dir() {
-            dirs_to_remove.push((entry.depth(), entry.into_path()));
-        }
-    }
-
-    for file in &files_to_remove {
-        match fs::remove_file(file) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(source) => return Err(path_error("remove file or symbolic link", file, source)),
-        }
-    }
-
-    dirs_to_remove.sort_by_key(|(depth, _)| std::cmp::Reverse(*depth));
-    for (_, dir) in &dirs_to_remove {
-        match fs::remove_dir(dir) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) if error.kind() == io::ErrorKind::DirectoryNotEmpty => {}
-            Err(source) => return Err(path_error("remove directory", dir, source)),
+            let entry_path = entry.path();
+            match fs::remove_dir(entry_path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) if error.kind() == io::ErrorKind::DirectoryNotEmpty => {}
+                Err(source) => {
+                    return Err(path_error("remove directory", entry_path, source));
+                }
+            }
         }
     }
 
@@ -94,4 +88,53 @@ pub fn safe_remove_dir_all(path: &Path) -> Result<RemovalStatus, AppError> {
 
 fn path_error(operation: &'static str, path: &Path, source: io::Error) -> AppError {
     AppError::PathOperation { operation, path: path.to_path_buf(), source }
+}
+
+#[cfg(test)]
+mod tests {
+    use assert_fs::TempDir;
+    use assert_fs::prelude::*;
+
+    use super::*;
+
+    #[test]
+    fn contents_first_removal_handles_wide_and_deep_trees() {
+        let temp = TempDir::new().expect("temp directory is created");
+        let root = temp.child("root");
+        root.create_dir_all().expect("root exists");
+        let mut deepest = root.path().to_path_buf();
+        for depth in 0..64 {
+            deepest.push(format!("level-{depth}"));
+            fs::create_dir(&deepest).expect("deep directory exists");
+            fs::write(deepest.join("cache.bin"), b"cache").expect("deep file exists");
+        }
+        for index in 0..256 {
+            let directory = root.path().join(format!("wide-{index}"));
+            fs::create_dir(&directory).expect("wide directory exists");
+            fs::write(directory.join("cache.bin"), b"cache").expect("wide file exists");
+        }
+
+        let outcome = safe_remove_dir_all(root.path()).expect("tree removal succeeds");
+
+        assert_eq!(outcome, RemovalStatus::Removed);
+        root.assert(predicates::path::missing());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unsupported_entry_created_inside_tree_is_retained_explicitly() {
+        use std::os::unix::net::UnixListener;
+
+        let temp = TempDir::new().expect("temp directory is created");
+        let root = temp.child("root");
+        root.create_dir_all().expect("root exists");
+        let socket = root.path().join("active.sock");
+        let listener = UnixListener::bind(&socket).expect("socket exists");
+
+        let outcome = safe_remove_dir_all(root.path()).expect("retained tree is not an I/O error");
+
+        assert_eq!(outcome, RemovalStatus::Retained);
+        assert!(socket.exists(), "unsupported active entry remains visible");
+        drop(listener);
+    }
 }

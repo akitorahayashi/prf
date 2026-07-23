@@ -117,11 +117,11 @@ and stops descending once a matching removable directory is found. A target uses
 
 A `RemovalCatalog` canonicalizes existing paths and merges aliases after discovery. A selected
 `RemovalPlan` omits descendants of another selected root while retaining candidate and target
-ownership. Parent paths are canonicalized without following a candidate's terminal symbolic link,
-so measurement, confirmation, and removal refer to the same entry. Within a traversed directory,
-files and symbolic links are removed before directories, deepest directories are attempted first,
-vanished paths are idempotent, and directories that become non-empty remain in place and are
-reported as retained.
+ownership. Candidate roots use component-aware sorting and a single prefix pass for maximal-root
+selection and attribution. Parent paths are canonicalized without following a candidate's terminal
+symbolic link, so measurement, confirmation, and removal refer to the same entry. Directory removal
+streams a contents-first traversal without retaining the full tree. Vanished paths are idempotent,
+and directories that become non-empty remain in place and are reported as retained.
 
 Path removals run in parallel before process actions. Application is not transactional: an error
 can follow other successful mutations, and no rollback occurs. Removed, already-absent, retained,
@@ -142,6 +142,9 @@ Process actions own their externally reported estimates, which remain outside pa
 normalization. Path actions always use allocated measurement. Missing paths contribute zero; other
 metadata and traversal failures are explicit. APFS clones, snapshots, and concurrent filesystem
 changes keep all displayed values estimates.
+
+Report construction caches each target's standalone estimate for interactive selection. Unknown
+candidate and root lookups are invariant errors rather than zero-valued fallbacks.
 
 ### Docker Inspection
 

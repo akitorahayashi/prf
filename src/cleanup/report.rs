@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::error::AppError;
@@ -37,6 +37,7 @@ pub struct ScanReport {
     catalog: Arc<RemovalCatalog>,
     footprint: Arc<Index>,
     reports: BTreeMap<TargetId, TargetReport>,
+    standalone_estimates: BTreeMap<TargetId, Estimate>,
     plan: RemovalPlan,
     estimate: Estimate,
 }
@@ -47,6 +48,7 @@ impl ScanReport {
             catalog: Arc::new(RemovalCatalog::default()),
             footprint: Arc::new(Index::default()),
             reports: BTreeMap::new(),
+            standalone_estimates: BTreeMap::new(),
             plan: RemovalPlan::default(),
             estimate: Estimate::ZERO,
         }
@@ -69,42 +71,45 @@ impl ScanReport {
         targets: &[TargetId],
     ) -> Result<Self, AppError> {
         let candidates = catalog.candidates();
-        let selected_targets = targets.iter().copied().collect::<HashSet<_>>();
-        let selected = candidates
-            .iter()
-            .enumerate()
-            .filter_map(|(index, candidate)| {
-                selected_targets.contains(&candidate.target()).then_some(index)
-            })
-            .collect::<Vec<_>>();
+        let mut indices_by_target =
+            targets.iter().copied().map(|target| (target, Vec::new())).collect::<BTreeMap<_, _>>();
+        let mut selected = Vec::new();
+        for (index, candidate) in candidates.iter().enumerate() {
+            if let Some(indices) = indices_by_target.get_mut(&candidate.target()) {
+                indices.push(index);
+                selected.push(index);
+            }
+        }
         let plan = catalog.plan(&selected)?;
         let breakdown = footprint.breakdown(plan.roots(), plan.reported())?;
-        let mut estimates = Contributions::new(&selected);
+        let mut estimates = Contributions::new(candidates.len(), &selected);
         for path in plan.paths() {
-            estimates.assign(path.attribution(), breakdown.path(path.root()))?;
+            estimates.assign(path.attribution(), breakdown.path(path.root())?)?;
         }
         for process in plan.processes() {
             estimates.assign(process.candidate(), process.estimate())?;
         }
 
         let mut reports = BTreeMap::new();
-        for target in targets {
-            let indices = candidates
-                .iter()
-                .enumerate()
-                .filter_map(|(index, candidate)| (candidate.target() == *target).then_some(index))
-                .collect::<Vec<_>>();
+        let mut standalone_estimates = BTreeMap::new();
+        for (target, indices) in &indices_by_target {
+            let target_plan = catalog.plan(indices)?;
+            let standalone =
+                footprint.breakdown(target_plan.roots(), target_plan.reported())?.total();
+            standalone_estimates.insert(*target, standalone);
             if indices.is_empty() {
                 continue;
             }
 
             let candidate_reports = indices
                 .iter()
-                .map(|index| CandidateReport {
-                    candidate: candidates[*index].clone(),
-                    estimate: estimates.get(*index),
+                .map(|index| {
+                    Ok(CandidateReport {
+                        candidate: candidates[*index].clone(),
+                        estimate: estimates.get(*index)?,
+                    })
                 })
-                .collect::<Vec<_>>();
+                .collect::<Result<Vec<_>, AppError>>()?;
             let estimate = candidate_reports
                 .iter()
                 .map(CandidateReport::estimate)
@@ -112,7 +117,14 @@ impl ScanReport {
             reports.insert(*target, TargetReport { candidates: candidate_reports, estimate });
         }
 
-        Ok(Self { catalog, footprint, reports, plan, estimate: breakdown.total() })
+        Ok(Self {
+            catalog,
+            footprint,
+            reports,
+            standalone_estimates,
+            plan,
+            estimate: breakdown.total(),
+        })
     }
 
     pub const fn estimate(&self) -> Estimate {
@@ -132,17 +144,10 @@ impl ScanReport {
         Self::view(Arc::clone(&self.catalog), Arc::clone(&self.footprint), &target_ids)
     }
 
-    pub fn estimate_for(&self, targets: &[TargetId]) -> Result<Estimate, AppError> {
-        let targets = targets.iter().copied().collect::<HashSet<_>>();
-        let selected = self
-            .catalog
-            .candidates()
-            .iter()
-            .enumerate()
-            .filter_map(|(index, candidate)| targets.contains(&candidate.target()).then_some(index))
-            .collect::<Vec<_>>();
-        let plan = self.catalog.plan(&selected)?;
-        Ok(self.footprint.breakdown(plan.roots(), plan.reported())?.total())
+    pub fn standalone_estimate(&self, target: TargetId) -> Result<Estimate, AppError> {
+        self.standalone_estimates.get(&target).copied().ok_or_else(|| {
+            AppError::Cleanup("standalone estimate references an unknown report target".to_string())
+        })
     }
 
     pub const fn removal_plan(&self) -> &RemovalPlan {
@@ -159,24 +164,30 @@ impl ScanReport {
 }
 
 struct Contributions {
-    values: BTreeMap<usize, Estimate>,
+    values: Vec<Option<Estimate>>,
 }
 
 impl Contributions {
-    fn new(indices: &[usize]) -> Self {
-        Self { values: indices.iter().copied().map(|index| (index, Estimate::ZERO)).collect() }
+    fn new(candidate_count: usize, indices: &[usize]) -> Self {
+        let mut values = vec![None; candidate_count];
+        for index in indices {
+            values[*index] = Some(Estimate::ZERO);
+        }
+        Self { values }
     }
 
     fn assign(&mut self, index: usize, estimate: Estimate) -> Result<(), AppError> {
-        let current = self.values.get(&index).copied().ok_or_else(|| {
+        let value = self.values.get_mut(index).and_then(Option::as_mut).ok_or_else(|| {
             AppError::Cleanup("footprint attribution references an unknown candidate".to_string())
         })?;
-        self.values.insert(index, current.checked_add(estimate)?);
+        *value = value.checked_add(estimate)?;
         Ok(())
     }
 
-    fn get(&self, index: usize) -> Estimate {
-        self.values.get(&index).copied().unwrap_or(Estimate::ZERO)
+    fn get(&self, index: usize) -> Result<Estimate, AppError> {
+        self.values.get(index).copied().flatten().ok_or_else(|| {
+            AppError::Cleanup("footprint report references an unknown candidate".to_string())
+        })
     }
 }
 
@@ -226,7 +237,7 @@ mod tests {
 
         let first = report.report_for(FIRST).expect("first report").estimate();
         let second_contribution = report.report_for(SECOND).expect("second report").estimate();
-        let second_alone = report.estimate_for(&[SECOND]).expect("standalone estimate");
+        let second_alone = report.standalone_estimate(SECOND).expect("standalone estimate");
 
         assert!(first >= second_alone);
         assert_eq!(second_contribution, Estimate::ZERO);
@@ -273,5 +284,19 @@ mod tests {
             ScanReport::build(catalog, footprint, &[&FIRST_TARGET]).expect("report is built");
 
         assert_eq!(report.estimate(), Estimate::ZERO);
+    }
+
+    #[test]
+    fn contribution_storage_rejects_unselected_candidate_indices() {
+        let mut contributions = Contributions::new(2, &[0]);
+
+        assert!(matches!(
+            contributions.get(1),
+            Err(AppError::Cleanup(message)) if message.contains("unknown candidate")
+        ));
+        assert!(matches!(
+            contributions.assign(1, Estimate::ZERO),
+            Err(AppError::Cleanup(message)) if message.contains("unknown candidate")
+        ));
     }
 }
