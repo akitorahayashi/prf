@@ -1,5 +1,9 @@
 use std::fmt;
 
+use clap::{ValueEnum, builder::PossibleValue};
+
+use super::catalog;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Category {
     Xcode,
@@ -12,41 +16,19 @@ pub enum Category {
 
 impl Category {
     pub fn from_name(value: &str) -> Option<Self> {
-        match value.to_ascii_lowercase().as_str() {
-            "xcode" => Some(Category::Xcode),
-            "python" => Some(Category::Python),
-            "rust" => Some(Category::Rust),
-            "nodejs" => Some(Category::Nodejs),
-            "brew" => Some(Category::Brew),
-            "docker" => Some(Category::Docker),
-            _ => None,
-        }
+        catalog::find(value).map(|entry| entry.category)
     }
 
     pub fn as_str(&self) -> &'static str {
-        match self {
-            Category::Xcode => "xcode",
-            Category::Python => "python",
-            Category::Rust => "rust",
-            Category::Nodejs => "nodejs",
-            Category::Brew => "brew",
-            Category::Docker => "docker",
-        }
+        catalog::entry(*self).id
     }
 
     pub fn display_name(&self) -> &'static str {
-        match self {
-            Category::Xcode => "Xcode",
-            Category::Python => "Python",
-            Category::Rust => "Rust",
-            Category::Nodejs => "Node.js",
-            Category::Brew => "Homebrew",
-            Category::Docker => "Docker",
-        }
+        catalog::entry(*self).display_name
     }
 
     pub fn supports_current_mode(&self, current: bool) -> bool {
-        !current || !matches!(self, Category::Brew | Category::Docker)
+        !current || catalog::entry(*self).supports_current
     }
 }
 
@@ -61,5 +43,16 @@ impl std::str::FromStr for Category {
 impl fmt::Display for Category {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+
+impl ValueEnum for Category {
+    fn value_variants<'a>() -> &'a [Self] {
+        catalog::category_order()
+    }
+
+    fn to_possible_value(&self) -> Option<PossibleValue> {
+        let entry = catalog::entry(*self);
+        Some(PossibleValue::new(entry.id).help(entry.description))
     }
 }

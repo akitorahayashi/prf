@@ -1,4 +1,5 @@
 use std::io;
+use std::path::PathBuf;
 
 use thiserror::Error;
 
@@ -19,6 +20,15 @@ pub enum AppError {
 
     #[error("No targets to scan: {0}")]
     NoTargetsToScan(String),
+
+    #[error("Home directory is unavailable; pass a PATH or use --current")]
+    HomeDirectoryUnavailable,
+
+    #[error("Current directory is unavailable: {0}")]
+    CurrentDirectoryUnavailable(io::Error),
+
+    #[error("Invalid scan root '{}': {reason}", path.display())]
+    InvalidRoot { path: PathBuf, reason: String },
 
     #[error("Operation cancelled by user")]
     Cancelled,

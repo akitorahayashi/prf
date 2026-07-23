@@ -40,10 +40,11 @@ fn run_inner() -> Result<(), AppError> {
 
     match cli.command {
         Commands::Scan(args) => {
-            let categories = args.resolve_categories()?;
+            let selection = args.resolve_categories()?;
             let options = app::scan::ScanOptions {
-                categories,
-                roots: resolve_roots_with_current(&args.paths, args.current),
+                categories: selection.categories,
+                request_origin: selection.origin,
+                roots: resolve_roots_with_current(&args.paths, args.current)?,
                 verbose: args.verbose,
                 list: args.list,
                 current: args.current,
@@ -52,11 +53,12 @@ fn run_inner() -> Result<(), AppError> {
         }
         Commands::Run(args) => {
             let interactive = args.interactive();
-            let categories = args.resolve_categories()?;
+            let selection = args.resolve_categories()?;
             let options = app::run::RunOptions {
-                categories,
+                categories: selection.categories,
+                request_origin: selection.origin,
                 interactive,
-                roots: resolve_roots_with_current(&args.paths, args.current),
+                roots: resolve_roots_with_current(&args.paths, args.current)?,
                 verbose: args.verbose,
                 assume_yes: args.yes,
                 current: args.current,

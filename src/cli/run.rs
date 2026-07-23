@@ -8,7 +8,7 @@ use crate::targets::category::Category;
 
 #[derive(Args)]
 pub struct RunArgs {
-    #[arg(short = 't', long = "type", value_name = "CATEGORY", action = ArgAction::Append, conflicts_with = "all")]
+    #[arg(short = 't', long = "type", value_name = "CATEGORY", value_enum, action = ArgAction::Append, conflicts_with = "all")]
     pub categories: Vec<Category>,
 
     #[arg(long = "all", action = ArgAction::SetTrue, help = "Scan all supported categories (respects --current)")]
@@ -28,7 +28,7 @@ pub struct RunArgs {
 }
 
 impl RunArgs {
-    pub fn resolve_categories(&self) -> Result<Vec<Category>, AppError> {
+    pub fn resolve_categories(&self) -> Result<catalog::CategorySelection, AppError> {
         catalog::resolve(&self.categories, self.all, self.current)
     }
 

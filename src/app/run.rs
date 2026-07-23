@@ -11,6 +11,7 @@ use crate::output::bytes::format_bytes;
 use crate::output::progress::deletion_progress_style;
 use crate::output::prompt::{confirm_deletion, prompt_for_categories};
 use crate::output::report::print_deletion_plan;
+use crate::targets::catalog::RequestOrigin;
 use crate::targets::category::Category;
 use crate::targets::docker;
 use crate::targets::item::CleanupItem;
@@ -21,6 +22,7 @@ use super::scan::scan_categories;
 
 pub struct RunOptions {
     pub categories: Vec<Category>,
+    pub request_origin: RequestOrigin,
     pub interactive: bool,
     pub roots: Vec<PathBuf>,
     pub verbose: bool,

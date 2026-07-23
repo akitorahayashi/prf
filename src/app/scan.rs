@@ -11,6 +11,7 @@ use crate::fs::size::path_size;
 use crate::output::progress::{discovery_spinner_style, size_progress_style};
 use crate::output::report::{print_list_results, print_scan_report};
 use crate::targets::catalog;
+use crate::targets::catalog::RequestOrigin;
 use crate::targets::category::Category;
 use crate::targets::item::{CleanupItem, ItemKind};
 use crate::targets::report::ScanReport;
@@ -18,6 +19,7 @@ use crate::targets::target::ScanScope;
 
 pub struct ScanOptions {
     pub categories: Vec<Category>,
+    pub request_origin: RequestOrigin,
     pub roots: Vec<PathBuf>,
     pub verbose: bool,
     pub list: bool,
