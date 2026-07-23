@@ -23,7 +23,8 @@ The CLI uses command-line arguments as its only runtime configuration surface.
 - Deletion confirmation control: `-y/--yes`
 - Verbose reporting: `-v/--verbose`
 
-No environment variable changes cleanup behavior or enables a hidden diagnostic mode.
+`HOME` resolves per-user paths and `PATH` resolves external tools. No prf-specific environment
+variable changes cleanup behavior or enables a hidden diagnostic mode.
 
 ## CI/CD Contract
 
