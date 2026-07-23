@@ -21,6 +21,7 @@ check:
     cargo fmt --check
     cargo clippy --all-targets --all-features -- -D warnings
     just --fmt --check --unstable
+    mise exec -- actionlint
 
 test:
     cargo test --all-targets --all-features --quiet
@@ -35,7 +36,6 @@ coverage:
         --out Html \
         --output-dir coverage \
         --all-features \
-        --exclude-files 'references/**' \
         --fail-under 80
 
 build:

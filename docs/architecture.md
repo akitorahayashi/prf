@@ -21,7 +21,7 @@
 | Cleanup domain | `src/cleanup/` | Target contracts, discovery, candidates, removal plans, application, and reports |
 | Footprint domain | `src/footprint/` | Allocated-space measurement, reported estimates, and selection-aware aggregation |
 | Target definitions | `src/targets/` | Declarative target definitions, the authoritative registry, and target-specific inspection |
-| Filesystem boundary | `src/fs/` | Root resolution and filesystem mutation mechanics |
+| Filesystem boundary | `src/fs/` | Filesystem mutation mechanics |
 | Output boundary | `src/output/` | Byte formatting, progress styles, reporting, diagnostics, and prompts |
 | Error model | `src/error.rs` | Typed application errors |
 
@@ -80,11 +80,23 @@ src/
 
 `src/targets/registry.rs` is the authoritative ordered target collection. CLI name resolution,
 default selection, presentation order, and current-mode eligibility derive from registered target
-definitions.
+definitions. Clap possible values use the same identifiers. Identifiers are lowercase, unique,
+may contain digits and hyphens, and cannot use the interactive `all` keyword.
 
 A standard target consists of one module containing metadata and standard discovery rules, plus one
 registry entry. Docker uses the target-specific inspector extension because its discovery protocol
 depends on Docker CLI availability and structured command output.
+
+## Scope Model
+
+`Scope` is either `Current { root }` or `Default { roots, home }`. CLI resolution captures the
+working directory and `HOME` once before target selection and inspection. Current scope contains
+exactly one root, disables home-relative discovery, and rejects default-only targets.
+
+Default scope uses `~/Desktop` when no positional path is supplied. Positional paths replace the
+recursive root set while preserving home-relative discovery. Exact duplicate roots are removed;
+descendant roots remain distinct because each root owns an independent discovery-depth boundary.
+Explicit roots remain usable without `HOME`, with one diagnostic for unavailable home discovery.
 
 ## Discovery Model
 
@@ -94,6 +106,13 @@ listing information. `scan --list` skips footprint measurement while using the s
 
 Discovery diagnostics are explicit inspection results. Command failures and malformed external
 output are errors rather than empty successful scans.
+
+Docker is the only custom inspector. An unavailable CLI or daemon produces a diagnostic and no
+candidate. A usable daemon is queried with `docker system df --format "{{json .}}"`; malformed
+JSON, missing reclaimable fields, invalid sizes, and command failures are discovery errors. A
+positive reclaimable total creates one process candidate for
+`docker system prune -a -f --volumes`; a zero total creates no action. The confirmation label names
+unused images, containers, networks, build cache, and volumes.
 
 ## Action Model
 
@@ -127,6 +146,9 @@ The outcome report is rendered before retained or failed actions cause a non-zer
 Directory application streams a contents-first walk and removes entries as they are yielded, so
 memory grows with traversal depth rather than the full removal tree.
 
+Terminal writes propagate through the application error model. A broken output pipe terminates
+successfully at the process boundary; other output failures remain explicit.
+
 ## Footprint Model
 
 Unix filesystem estimates derive from allocated blocks in 512-byte units. Regular files,
@@ -156,6 +178,10 @@ failed removal can make eventual free-space changes differ from scan output.
 - Scanning is non-destructive.
 - Deletion requires explicit confirmation unless `-y/--yes` is provided.
 - Only candidates surfaced by the approved scan report are applied.
+- A terminal symbolic-link candidate is measured and removed as a link entry without following its
+  target.
+- Removed, already-absent, retained, and failed outcomes remain available after partial mutation.
+- Retained and failed confirmed actions produce a non-zero result after outcome rendering.
 - Current-directory mode excludes registered targets without current-mode support.
 - Global discovery rules are absent from current-mode inspection.
 - The default scan root is `~/Desktop`; a missing `HOME` without an explicit path or `--current`

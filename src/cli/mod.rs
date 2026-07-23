@@ -1,13 +1,19 @@
 use std::io::{self, Write};
 
+use clap::builder::PossibleValuesParser;
 use clap::{Parser, Subcommand};
 
 use crate::app;
 use crate::cleanup::Scope;
 use crate::error::AppError;
+use crate::targets::registry;
 
 pub mod run;
 pub mod scan;
+
+fn target_value_parser() -> PossibleValuesParser {
+    PossibleValuesParser::new(registry::names())
+}
 
 #[derive(Parser)]
 #[command(

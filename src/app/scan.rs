@@ -25,13 +25,20 @@ pub fn execute(options: ScanOptions) -> Result<ScanReport, AppError> {
 }
 
 pub fn list_targets(options: ScanOptions) -> Result<(), AppError> {
+    list_targets_with(options, |targets, inspections, home| {
+        print_diagnostics(inspections)?;
+        print_list_results(targets, inspections, home)
+    })
+}
+
+fn list_targets_with<F>(options: ScanOptions, render: F) -> Result<(), AppError>
+where
+    F: FnOnce(&[&Target], &[Inspection], Option<&std::path::Path>) -> Result<(), AppError>,
+{
     let inspections: Result<Vec<Inspection>, AppError> =
         options.targets.par_iter().map(|target| target.inspect(&options.scope)).collect();
     let inspections = inspections?;
-
-    print_diagnostics(&inspections)?;
-    print_list_results(&options.targets, &inspections, options.scope.home())?;
-    Ok(())
+    render(&options.targets, &inspections, options.scope.home())
 }
 
 pub fn scan_targets(
@@ -88,4 +95,55 @@ pub fn scan_targets(
     progress.println(messages::footprint_calculation_complete(total_items))?;
 
     ScanReport::build(catalog, footprint, targets)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::io::ErrorKind;
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::cleanup::{Candidate, Discovery, ScopeSupport, TargetId};
+
+    const TARGET_ID: TargetId = TargetId::new("list-test");
+    const UNMEASURABLE: &str = "/dev/null/prf-list-candidate";
+
+    fn inspect_without_measurement(
+        target: TargetId,
+        _scope: &Scope,
+    ) -> Result<Inspection, AppError> {
+        Ok(Inspection {
+            candidates: vec![Candidate::directory(target, PathBuf::from(UNMEASURABLE))],
+            listings: vec![crate::cleanup::Listing::Detail(
+                "Deterministic list candidate".to_string(),
+            )],
+            diagnostics: Vec::new(),
+        })
+    }
+
+    static TARGET: Target = Target::new(
+        TARGET_ID,
+        "List test",
+        ScopeSupport::AllModes,
+        Discovery::Inspector(inspect_without_measurement),
+    );
+
+    #[test]
+    fn list_flow_does_not_measure_discovered_candidates() {
+        let precondition = std::fs::symlink_metadata(UNMEASURABLE)
+            .expect_err("/dev/null cannot contain a child path");
+        assert_eq!(precondition.kind(), ErrorKind::NotADirectory);
+        let scope =
+            Scope::resolve(&[PathBuf::from("/unused")], false, None, PathBuf::from("/unused"))
+                .expect("explicit scope resolves");
+
+        list_targets_with(
+            ScanOptions { targets: vec![&TARGET], scope, verbose: false },
+            |_targets, inspections, _home| {
+                assert_eq!(inspections[0].candidates.len(), 1);
+                Ok(())
+            },
+        )
+        .expect("list flow succeeds without footprint measurement");
+    }
 }

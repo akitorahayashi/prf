@@ -9,6 +9,8 @@ use crate::cleanup::{
 use crate::error::AppError;
 
 const PRUNE_ARGS: &[&str] = &["system", "prune", "-a", "-f", "--volumes"];
+const PRUNE_LABEL: &str =
+    "Docker prune: unused images, containers, networks, build cache, and volumes (-a --volumes)";
 const LISTINGS: &[&str] =
     &["Unused images", "Stopped containers", "Unused volumes", "Unused networks", "Build cache"];
 
@@ -57,13 +59,7 @@ fn inspect(target: TargetId, _scope: &Scope) -> Result<Inspection, AppError> {
     let candidates = if reclaimable == 0 {
         Vec::new()
     } else {
-        vec![Candidate::process(
-            target,
-            "Docker reclaimable (docker system prune)",
-            "docker",
-            PRUNE_ARGS,
-            reclaimable,
-        )]
+        vec![Candidate::process(target, PRUNE_LABEL, "docker", PRUNE_ARGS, reclaimable)]
     };
 
     Ok(Inspection {

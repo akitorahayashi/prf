@@ -21,6 +21,12 @@ jobs:
       release_id: ${{ steps.prepare.outputs.release_id }}
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Verify tag matches package version
+        run: bash scripts/verify-release-version.sh "$GITHUB_REF_NAME"
+
       - id: prepare
         uses: akitorahayashi/gh-release@v1
         with:

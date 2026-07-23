@@ -23,7 +23,11 @@ Target behavior:
 
 - Default targets: xcode, python, rust, nodejs, brew, docker
 - Current-directory mode (`--current`) excludes brew and docker targets
-- Docker cleanup runs only when docker is requested and `--current` is not used
+- Positional paths replace `~/Desktop` while retaining applicable home-relative discovery
+- `--type` and `--all` skip target selection for `run` but retain deletion confirmation
+- `--yes` skips deletion confirmation but does not skip otherwise-required target selection
+- Docker cleanup uses `docker system prune -a -f --volumes` and names unused images, containers,
+  networks, build cache, and volumes in the deletion plan
 
 Filesystem scan values estimate allocated disk space released by the selected removal roots. Sparse
 files use allocated blocks, hard-linked files contribute only when every link is selected, and

@@ -52,7 +52,9 @@ exit 0
         .arg("-y")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Reclaimed"));
+        .stdout(predicate::str::contains("Reclaimed"))
+        .stdout(predicate::str::contains("unused images, containers, networks, build cache"))
+        .stdout(predicate::str::contains("volumes (-a --volumes)"));
 
     let recorded =
         std::fs::read_to_string(&marker).expect("docker system prune should have been invoked");
@@ -127,7 +129,7 @@ exit 0
         .failure()
         .stdout(predicate::str::contains("0 completed"))
         .stdout(predicate::str::contains("1 failed"))
-        .stderr(predicate::str::contains("Failed: Docker reclaimable"))
+        .stderr(predicate::str::contains("Failed: Docker prune"))
         .stderr(predicate::str::contains("status"))
         .stderr(predicate::str::contains("Cleanup incomplete"));
 }
@@ -196,7 +198,7 @@ exit 0
         .failure()
         .stdout(predicate::str::contains("1 completed"))
         .stdout(predicate::str::contains("1 failed"))
-        .stderr(predicate::str::contains("Docker reclaimable"));
+        .stderr(predicate::str::contains("Docker prune"));
 
     assert!(!cache_dir.exists(), "the successful path action must remain reported and applied");
 }
@@ -227,7 +229,7 @@ exit 0
         .assert()
         .failure()
         .stdout(predicate::str::contains("1 failed"))
-        .stderr(predicate::str::contains("Cannot start Docker reclaimable"))
+        .stderr(predicate::str::contains("Cannot start Docker prune"))
         .stderr(predicate::str::contains("'docker'"));
 }
 

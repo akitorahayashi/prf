@@ -18,6 +18,10 @@ pub fn all() -> &'static [&'static Target] {
     &TARGETS
 }
 
+pub fn names() -> Vec<&'static str> {
+    all().iter().map(|target| target.id().as_str()).collect()
+}
+
 pub fn find(name: &str) -> Option<&'static Target> {
     TARGETS.iter().copied().find(|target| target.id().as_str().eq_ignore_ascii_case(name))
 }
@@ -64,10 +68,15 @@ pub fn resolve(
 }
 
 fn validate() -> Result<(), AppError> {
+    validate_targets(all())
+}
+
+fn validate_targets(targets: &[&Target]) -> Result<(), AppError> {
     let mut identifiers = HashSet::new();
-    for target in all() {
+    for target in targets {
         let id = target.id().as_str();
-        if id.is_empty()
+        if id == "all"
+            || id.is_empty()
             || !id.chars().all(|character| {
                 character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
             })
@@ -122,6 +131,31 @@ mod tests {
         assert!(matches!(
             resolve(&["docker".to_string()], false, ScopeMode::Current),
             Err(AppError::UnsupportedCurrentModeTarget(_))
+        ));
+    }
+
+    #[test]
+    fn every_registered_name_resolves_case_insensitively() {
+        for name in names() {
+            let selected = resolve(&[name.to_ascii_uppercase()], false, ScopeMode::Default)
+                .expect("registered name resolves");
+            assert_eq!(selected[0].id().as_str(), name);
+        }
+    }
+
+    #[test]
+    fn registry_reserves_the_interactive_all_keyword() {
+        static ALL: Target = Target::new(
+            TargetId::new("all"),
+            "All",
+            ScopeSupport::AllModes,
+            crate::cleanup::Discovery::Rules(&[]),
+        );
+
+        assert!(matches!(
+            validate_targets(&[&ALL]),
+            Err(AppError::InvalidTargetRegistry(message))
+                if message.contains("invalid target identifier")
         ));
     }
 }

@@ -50,7 +50,19 @@ pub fn parse_selection<'a>(
             continue;
         }
 
-        if let Ok(index) = token.parse::<usize>() {
+        if let Some(target) = available
+            .iter()
+            .copied()
+            .find(|target| target.id().as_str().eq_ignore_ascii_case(token))
+        {
+            push_unique(&mut selected, target);
+            continue;
+        }
+
+        if token.chars().all(|character| character.is_ascii_digit()) {
+            let index = token
+                .parse::<usize>()
+                .map_err(|_| AppError::TargetIndexOutOfRange(token.to_string()))?;
             if index < 1 || index > available.len() {
                 return Err(AppError::TargetIndexOutOfRange(token.to_string()));
             }
@@ -58,18 +70,7 @@ pub fn parse_selection<'a>(
             continue;
         }
 
-        if token.chars().any(|character| character.is_ascii_digit())
-            && token.chars().any(|character| character.is_ascii_alphabetic())
-        {
-            return Err(AppError::InvalidTarget(token.to_string()));
-        }
-
-        let target = available
-            .iter()
-            .copied()
-            .find(|target| target.id().as_str().eq_ignore_ascii_case(token))
-            .ok_or_else(|| AppError::InvalidTarget(token.to_string()))?;
-        push_unique(&mut selected, target);
+        return Err(AppError::InvalidTarget(token.to_string()));
     }
 
     if selected.is_empty() {
@@ -102,7 +103,15 @@ pub fn confirm_deletion(total_size: u64) -> Result<bool, AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cleanup::{Discovery, ScopeSupport, TargetId};
     use crate::targets::registry;
+
+    static TOOL2: Target = Target::new(
+        TargetId::new("tool2"),
+        "Tool 2",
+        ScopeSupport::AllModes,
+        Discovery::Rules(&[]),
+    );
 
     fn available() -> Vec<&'static Target> {
         ["xcode", "python", "rust"]
@@ -180,5 +189,15 @@ mod tests {
     #[test]
     fn digit_alpha_token_is_rejected() {
         assert!(matches!(parse_selection("1a", &available()), Err(AppError::InvalidTarget(_))));
+    }
+
+    #[test]
+    fn registered_digit_name_is_resolved_before_index_parsing() {
+        let available = vec![&TOOL2];
+
+        assert_eq!(
+            ids(&parse_selection("TOOL2", &available).expect("digit name resolves")),
+            vec!["tool2"]
+        );
     }
 }
