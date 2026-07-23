@@ -9,4 +9,5 @@ pub mod python;
 pub mod report;
 pub mod rust;
 pub mod target;
+pub mod traversal;
 pub mod xcode;

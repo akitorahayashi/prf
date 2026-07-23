@@ -1,14 +1,15 @@
 use std::collections::HashSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use dirs_next as dirs;
-use walkdir::WalkDir;
 
 use crate::error::AppError;
 
 use super::category::Category;
-use super::item::{CleanupItem, ItemKind};
-use super::target::{CleanupTarget, ScanScope};
+use super::item::{CleanupItem, PathAuthority};
+use super::target::{CleanupTarget, DiscoveryOutcome, ScanScope};
+use super::traversal::{VisitControl, visit_roots};
 
 pub struct XcodeTarget {
     current: bool,
@@ -35,138 +36,80 @@ impl XcodeTarget {
         paths
     }
 
-    fn add_path(&self, path: &Path, items: &mut Vec<CleanupItem>) {
-        let kind = if path.is_file() { ItemKind::File } else { ItemKind::Directory };
-        items.push(CleanupItem {
-            category: Category::Xcode,
-            path: path.to_path_buf(),
-            size: 0,
-            kind,
-        });
+    fn add_path(
+        &self,
+        path: &Path,
+        authority: PathAuthority,
+        items: &mut Vec<CleanupItem>,
+    ) -> Result<(), AppError> {
+        items.push(CleanupItem::from_path(Category::Xcode, path.to_path_buf(), authority)?);
+        Ok(())
     }
 
-    fn collect_swiftpm_artifacts(&self, parent: &Path, items: &mut Vec<CleanupItem>) {
+    fn collect_swiftpm_artifacts(
+        &self,
+        parent: &Path,
+        authority: &PathAuthority,
+        items: &mut Vec<CleanupItem>,
+    ) -> Result<(), AppError> {
         const ARTIFACTS: &[&str] = &[".build", ".swiftpm"];
         for artifact in ARTIFACTS {
             let artifact_path = parent.join(artifact);
-            if artifact_path.exists() {
-                self.add_path(&artifact_path, items);
+            match fs::symlink_metadata(&artifact_path) {
+                Ok(_) => self.add_path(&artifact_path, authority.clone(), items)?,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(AppError::Traversal {
+                        path: artifact_path,
+                        reason: error.to_string(),
+                    });
+                }
             }
         }
+        Ok(())
     }
 
-    fn scan_global_caches(&self) -> Vec<CleanupItem> {
+    fn scan_global_caches(&self) -> Result<Vec<CleanupItem>, AppError> {
         let mut items = Vec::new();
         for path in Self::global_safe_paths() {
-            if path.exists() {
-                self.add_path(&path, &mut items);
+            match fs::symlink_metadata(&path) {
+                Ok(_) => {
+                    self.add_path(&path, PathAuthority::UserPath(path.clone()), &mut items)?;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(AppError::Traversal { path, reason: error.to_string() });
+                }
             }
         }
-        items
+        Ok(items)
     }
 
-    fn scan_local_projects(&self, scope: &ScanScope) -> Vec<CleanupItem> {
+    fn scan_local_projects(&self, scope: &ScanScope) -> Result<Vec<CleanupItem>, AppError> {
         let mut items = Vec::new();
         let mut processed_packages: HashSet<PathBuf> = HashSet::new();
 
-        for root in scope.roots() {
-            if !root.exists() {
-                continue;
+        visit_roots(scope, |root, entry| {
+            let path = entry.path();
+            let file_name = entry.file_name().to_string_lossy();
+            let authority = PathAuthority::LocalRoot(root.to_path_buf());
+
+            if entry.file_type().is_dir() && file_name == "DerivedData" {
+                self.add_path(path, authority, &mut items)?;
+                return Ok(VisitControl::SkipDirectory);
             }
 
-            let mut walker = WalkDir::new(root).max_depth(10).into_iter();
-            while let Some(entry) = walker.next() {
-                let entry = match entry {
-                    Ok(entry) => entry,
-                    Err(err) => {
-                        if scope.verbose() {
-                            eprintln!("Skipping {:?}: {}", err.path(), err);
-                        }
-                        continue;
-                    }
-                };
-
-                let path = entry.path();
-                let file_name = entry.file_name().to_string_lossy();
-
-                if entry.file_type().is_dir() && file_name == "DerivedData" {
-                    self.add_path(path, &mut items);
-                    walker.skip_current_dir();
-                    continue;
-                }
-
-                if entry.file_type().is_file()
-                    && file_name == "Package.swift"
-                    && let Some(parent) = path.parent()
-                    && processed_packages.insert(parent.to_path_buf())
-                {
-                    self.collect_swiftpm_artifacts(parent, &mut items);
-                }
+            if entry.file_type().is_file()
+                && file_name == "Package.swift"
+                && let Some(parent) = path.parent()
+                && processed_packages.insert(parent.to_path_buf())
+            {
+                self.collect_swiftpm_artifacts(parent, &authority, &mut items)?;
             }
-        }
+            Ok(VisitControl::Continue)
+        })?;
 
-        items
-    }
-
-    fn list_global_targets(&self) -> Vec<String> {
-        let mut targets = Vec::new();
-        for path in Self::global_safe_paths() {
-            if path.exists() {
-                targets.push(format!("{} (exists)", path.display()));
-            }
-        }
-        targets
-    }
-
-    fn list_local_targets(&self, scope: &ScanScope) -> Vec<String> {
-        let mut targets = Vec::new();
-        let mut derived_data = 0usize;
-        let mut swiftpm_projects = 0usize;
-
-        for root in scope.roots() {
-            if !root.exists() {
-                continue;
-            }
-
-            let mut walker = WalkDir::new(root).max_depth(10).into_iter();
-            while let Some(entry) = walker.next() {
-                let entry = match entry {
-                    Ok(entry) => entry,
-                    Err(err) => {
-                        if scope.verbose() {
-                            eprintln!("Skipping {:?}: {}", err.path(), err);
-                        }
-                        continue;
-                    }
-                };
-
-                let file_name = entry.file_name().to_string_lossy();
-                if entry.file_type().is_dir() && file_name == "DerivedData" {
-                    derived_data += 1;
-                    walker.skip_current_dir();
-                } else if entry.file_type().is_file() && file_name == "Package.swift" {
-                    swiftpm_projects += 1;
-                }
-            }
-        }
-
-        if derived_data > 0 {
-            targets.push(format!(
-                "DerivedData ({} location{} found)",
-                derived_data,
-                if derived_data == 1 { "" } else { "s" }
-            ));
-        }
-
-        if swiftpm_projects > 0 {
-            targets.push(format!(
-                "SwiftPM Projects (.build, .swiftpm) ({} location{} found)",
-                swiftpm_projects,
-                if swiftpm_projects == 1 { "" } else { "s" }
-            ));
-        }
-
-        targets
+        Ok(items)
     }
 }
 
@@ -175,22 +118,13 @@ impl CleanupTarget for XcodeTarget {
         Category::Xcode
     }
 
-    fn discover(&self, scope: &ScanScope) -> Result<Vec<CleanupItem>, AppError> {
-        let mut items = self.scan_local_projects(scope);
+    fn discover(&self, scope: &ScanScope) -> Result<DiscoveryOutcome, AppError> {
+        let mut items = self.scan_local_projects(scope)?;
         if !self.current {
-            let mut global_items = self.scan_global_caches();
+            let mut global_items = self.scan_global_caches()?;
             items.append(&mut global_items);
         }
-        Ok(items)
-    }
-
-    fn list(&self, scope: &ScanScope) -> Result<Vec<String>, AppError> {
-        let mut targets = self.list_local_targets(scope);
-        if !self.current {
-            let mut global = self.list_global_targets();
-            targets.append(&mut global);
-        }
-        Ok(targets)
+        Ok(DiscoveryOutcome::Complete(items))
     }
 }
 
@@ -202,6 +136,15 @@ mod tests {
     use std::env;
 
     use super::*;
+
+    fn complete_items(outcome: DiscoveryOutcome) -> Vec<CleanupItem> {
+        match outcome {
+            DiscoveryOutcome::Complete(items) => items,
+            DiscoveryOutcome::Unavailable(reason) => {
+                panic!("unexpected unavailable target: {reason}")
+            }
+        }
+    }
 
     struct HomeGuard {
         original_home: Option<String>,
@@ -242,10 +185,10 @@ mod tests {
 
         let target = XcodeTarget::new(false);
         let scope = ScanScope::new(vec![project_root.path().to_path_buf()], false, true);
-        let items = target.discover(&scope).expect("scan succeeds");
+        let items = complete_items(target.discover(&scope).expect("scan succeeds"));
 
         assert!(
-            items.iter().any(|item| item.path.ends_with("DerivedData")),
+            items.iter().any(|item| item.path().is_some_and(|path| path.ends_with("DerivedData"))),
             "expected DerivedData directory to be reported"
         );
     }
@@ -269,29 +212,30 @@ mod tests {
 
         let target = XcodeTarget::new(false);
         let scope = ScanScope::new(vec![roots.path().to_path_buf()], false, true);
-        let items = target.discover(&scope).expect("scan succeeds");
+        let items = complete_items(target.discover(&scope).expect("scan succeeds"));
 
         assert!(
-            items.iter().any(|item| item.path.to_string_lossy().contains("AppWithPackage/.build")),
+            items.iter().any(|item| item
+                .path()
+                .is_some_and(|path| path.to_string_lossy().contains("AppWithPackage/.build"))),
             ".build directory should be reported when Package.swift exists"
         );
         assert!(
-            items
-                .iter()
-                .any(|item| item.path.to_string_lossy().contains("AppWithPackage/.swiftpm")),
+            items.iter().any(|item| item
+                .path()
+                .is_some_and(|path| path.to_string_lossy().contains("AppWithPackage/.swiftpm"))),
             ".swiftpm directory should be reported when Package.swift exists"
         );
         assert!(
-            !items.iter().any(|item| item
-                .path
+            !items.iter().any(|item| item.path().is_some_and(|path| path
                 .to_string_lossy()
-                .contains("AppWithPackage/Package.resolved")),
+                .contains("AppWithPackage/Package.resolved"))),
             "Package.resolved should not be reported even if Package.swift exists"
         );
         assert!(
-            !items
-                .iter()
-                .any(|item| item.path.to_string_lossy().contains("AppWithoutPackage/.build")),
+            !items.iter().any(|item| item
+                .path()
+                .is_some_and(|path| path.to_string_lossy().contains("AppWithoutPackage/.build"))),
             "projects without Package.swift should be ignored"
         );
     }
@@ -308,18 +252,18 @@ mod tests {
 
         let scope = ScanScope::new(Vec::new(), false, false);
         let target = XcodeTarget::new(false);
-        let items = target.discover(&scope).expect("scan succeeds");
+        let items = complete_items(target.discover(&scope).expect("scan succeeds"));
         assert!(
-            items.iter().any(|item| item
-                .path
+            items.iter().any(|item| item.path().is_some_and(|path| path
                 .to_string_lossy()
-                .contains("Library/Developer/Xcode/DerivedData")),
+                .contains("Library/Developer/Xcode/DerivedData"))),
             "global caches should be detected when not in current-only mode"
         );
 
         let current_scope = ScanScope::new(Vec::new(), true, false);
         let current_target = XcodeTarget::new(true);
-        let current_items = current_target.discover(&current_scope).expect("scan succeeds");
+        let current_items =
+            complete_items(current_target.discover(&current_scope).expect("scan succeeds"));
         assert!(current_items.is_empty(), "--current should skip global caches");
     }
 }

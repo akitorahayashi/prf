@@ -15,8 +15,7 @@ pub fn prompt_for_categories(
     );
 
     for (index, category) in available_categories.iter().enumerate() {
-        let report = report.report_for(*category);
-        let size = report.map(|value| value.total_size()).unwrap_or_default();
+        let size = report.category_total_size(*category);
         println!("  [{}] {:<8} {:>10}", index + 1, category, format_bytes(size));
     }
 

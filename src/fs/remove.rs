@@ -10,7 +10,7 @@ use crate::targets::item::ItemKind;
 pub fn remove_item(path: &Path, kind: ItemKind, verbose: bool) -> Result<(), AppError> {
     match kind {
         ItemKind::Directory => safe_remove_dir_all(path, verbose),
-        ItemKind::File => match fs::remove_file(path) {
+        ItemKind::File | ItemKind::Symlink => match fs::remove_file(path) {
             Ok(()) => Ok(()),
             Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
             Err(err) => Err(AppError::Io(err)),

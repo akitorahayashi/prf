@@ -3,7 +3,7 @@ use crate::error::AppError;
 use super::category::Category;
 use super::item::CleanupItem;
 use super::name_matcher::NameMatcherTarget;
-use super::target::{CleanupTarget, ScanScope};
+use super::target::{CleanupTarget, DiscoveryOutcome, ScanScope};
 
 const NODEJS_TARGETS: &[&str] = &["node_modules", ".next", ".nuxt", ".svelte-kit"];
 
@@ -26,11 +26,7 @@ impl CleanupTarget for NodejsTarget {
         self.0.category()
     }
 
-    fn discover(&self, scope: &ScanScope) -> Result<Vec<CleanupItem>, AppError> {
+    fn discover(&self, scope: &ScanScope) -> Result<DiscoveryOutcome, AppError> {
         self.0.discover(scope)
-    }
-
-    fn list(&self, scope: &ScanScope) -> Result<Vec<String>, AppError> {
-        self.0.list(scope)
     }
 }

@@ -30,8 +30,12 @@ impl ScanScope {
     }
 }
 
+pub enum DiscoveryOutcome {
+    Complete(Vec<CleanupItem>),
+    Unavailable(String),
+}
+
 pub trait CleanupTarget: Send + Sync {
     fn category(&self) -> Category;
-    fn discover(&self, scope: &ScanScope) -> Result<Vec<CleanupItem>, AppError>;
-    fn list(&self, scope: &ScanScope) -> Result<Vec<String>, AppError>;
+    fn discover(&self, scope: &ScanScope) -> Result<DiscoveryOutcome, AppError>;
 }

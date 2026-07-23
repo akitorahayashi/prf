@@ -1,4 +1,8 @@
+use std::collections::BTreeSet;
+use std::fs;
 use std::path::{Path, PathBuf};
+
+use crate::error::AppError;
 
 use super::category::Category;
 
@@ -6,30 +10,150 @@ use super::category::Category;
 pub enum ItemKind {
     File,
     Directory,
+    Symlink,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PathAuthority {
+    LocalRoot(PathBuf),
+    UserPath(PathBuf),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FilesystemCandidate {
+    pub path: PathBuf,
+    pub kind: ItemKind,
+    pub authority: PathAuthority,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ExternalAction {
+    DockerPrune,
+}
+
+impl ExternalAction {
+    pub fn description(self) -> &'static str {
+        match self {
+            ExternalAction::DockerPrune => "docker system prune --all --force --volumes",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CleanupAction {
+    Filesystem(FilesystemCandidate),
+    External(ExternalAction),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FileIdentity {
+    pub device: u64,
+    pub inode: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Allocation {
+    pub identity: FileIdentity,
+    pub bytes: u64,
 }
 
 #[derive(Debug, Clone)]
 pub struct CleanupItem {
-    pub category: Category,
-    pub path: PathBuf,
+    pub categories: BTreeSet<Category>,
+    pub action: CleanupAction,
     pub size: u64,
-    pub kind: ItemKind,
+    allocations: Vec<Allocation>,
 }
 
 impl CleanupItem {
-    pub fn directory(category: Category, path: PathBuf, size: u64) -> Self {
-        Self { category, path, size, kind: ItemKind::Directory }
+    pub fn filesystem(
+        category: Category,
+        path: PathBuf,
+        kind: ItemKind,
+        authority: PathAuthority,
+    ) -> Self {
+        Self {
+            categories: BTreeSet::from([category]),
+            action: CleanupAction::Filesystem(FilesystemCandidate { path, kind, authority }),
+            size: 0,
+            allocations: Vec::new(),
+        }
     }
 
-    pub fn file(category: Category, path: PathBuf, size: u64) -> Self {
-        Self { category, path, size, kind: ItemKind::File }
+    pub fn directory(category: Category, path: PathBuf, authority: PathAuthority) -> Self {
+        Self::filesystem(category, path, ItemKind::Directory, authority)
     }
 
-    pub fn is_zero(&self) -> bool {
-        self.size == 0
+    pub fn from_path(
+        category: Category,
+        path: PathBuf,
+        authority: PathAuthority,
+    ) -> Result<Self, AppError> {
+        let metadata = fs::symlink_metadata(&path).map_err(|error| AppError::Traversal {
+            path: path.clone(),
+            reason: error.to_string(),
+        })?;
+        let kind = if metadata.file_type().is_symlink() {
+            ItemKind::Symlink
+        } else if metadata.is_dir() {
+            ItemKind::Directory
+        } else {
+            ItemKind::File
+        };
+        Ok(Self::filesystem(category, path, kind, authority))
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
+    pub fn docker_prune(size: u64) -> Self {
+        Self {
+            categories: BTreeSet::from([Category::Docker]),
+            action: CleanupAction::External(ExternalAction::DockerPrune),
+            size,
+            allocations: Vec::new(),
+        }
+    }
+
+    pub fn categories(&self) -> impl Iterator<Item = Category> + '_ {
+        self.categories.iter().copied()
+    }
+
+    pub fn has_category(&self, category: Category) -> bool {
+        self.categories.contains(&category)
+    }
+
+    pub fn retain_categories(&mut self, selected: &[Category]) {
+        self.categories.retain(|category| selected.contains(category));
+    }
+
+    pub fn merge_categories(&mut self, other: &Self) {
+        self.categories.extend(other.categories.iter().copied());
+    }
+
+    pub fn filesystem_candidate(&self) -> Option<&FilesystemCandidate> {
+        match &self.action {
+            CleanupAction::Filesystem(candidate) => Some(candidate),
+            CleanupAction::External(_) => None,
+        }
+    }
+
+    pub fn external_action(&self) -> Option<ExternalAction> {
+        match self.action {
+            CleanupAction::Filesystem(_) => None,
+            CleanupAction::External(action) => Some(action),
+        }
+    }
+
+    pub fn path(&self) -> Option<&Path> {
+        self.filesystem_candidate().map(|candidate| candidate.path.as_path())
+    }
+
+    pub fn set_allocations(&mut self, allocations: Vec<Allocation>) {
+        self.size = allocations
+            .iter()
+            .fold(0u64, |total, allocation| total.saturating_add(allocation.bytes));
+        self.allocations = allocations;
+    }
+
+    pub fn allocations(&self) -> &[Allocation] {
+        &self.allocations
     }
 }

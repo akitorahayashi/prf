@@ -30,6 +30,21 @@ pub enum AppError {
     #[error("Invalid scan root '{}': {reason}", path.display())]
     InvalidRoot { path: PathBuf, reason: String },
 
+    #[error("Cannot traverse '{}': {reason}", path.display())]
+    Traversal { path: PathBuf, reason: String },
+
+    #[error("Cannot measure '{}': {reason}", path.display())]
+    Measurement { path: PathBuf, reason: String },
+
+    #[error("{category} is unavailable: {reason}")]
+    CategoryUnavailable { category: String, reason: String },
+
+    #[error("Scan is incomplete: {0}")]
+    IncompleteScan(String),
+
+    #[error("External command failed: {0}")]
+    ExternalCommand(String),
+
     #[error("Operation cancelled by user")]
     Cancelled,
 }

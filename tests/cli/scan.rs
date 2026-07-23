@@ -41,6 +41,10 @@ fn scan_list_reports_docker_when_docker_is_available() {
 if [ "$1" = "info" ]; then
   exit 0
 fi
+if [ "$1" = "system" ] && [ "$2" = "df" ]; then
+  echo '{"Reclaimable":"1GB (100%)"}'
+  exit 0
+fi
 exit 0
 "#,
     );
@@ -52,6 +56,22 @@ exit 0
         .assert()
         .success()
         .stdout(predicate::str::contains("Docker"))
-        .stdout(predicate::str::contains("Unused images"))
-        .stdout(predicate::str::contains("Build cache"));
+        .stdout(predicate::str::contains("docker system prune --all --force --volumes"));
+}
+
+#[test]
+fn scan_finds_uv_cache_beyond_the_previous_depth_limit() {
+    let ctx = TestContext::new();
+    let nested = (1..=12).map(|depth| format!("level-{depth}")).collect::<Vec<_>>().join("/");
+    ctx.write_home_file(format!("{nested}/.uv-cache/archive.bin"), "cache");
+
+    ctx.cli()
+        .arg("scan")
+        .arg("--type")
+        .arg("python")
+        .arg("--verbose")
+        .arg(ctx.home())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(".uv-cache"));
 }
