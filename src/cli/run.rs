@@ -2,16 +2,16 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Args};
 
+use crate::cleanup::Target;
 use crate::error::AppError;
-use crate::targets::catalog;
-use crate::targets::category::Category;
+use crate::targets::registry;
 
 #[derive(Args)]
 pub struct RunArgs {
-    #[arg(short = 't', long = "type", value_name = "CATEGORY", action = ArgAction::Append, conflicts_with = "all")]
-    pub categories: Vec<Category>,
+    #[arg(short = 't', long = "type", value_name = "TARGET", action = ArgAction::Append, conflicts_with = "all")]
+    pub targets: Vec<String>,
 
-    #[arg(long = "all", action = ArgAction::SetTrue, help = "Scan all supported categories (respects --current)")]
+    #[arg(long = "all", action = ArgAction::SetTrue, help = "Scan all supported targets (respects --current)")]
     pub all: bool,
 
     #[arg(short = 'y', long = "yes", action = ArgAction::SetTrue)]
@@ -28,11 +28,11 @@ pub struct RunArgs {
 }
 
 impl RunArgs {
-    pub fn resolve_categories(&self) -> Result<Vec<Category>, AppError> {
-        catalog::resolve(&self.categories, self.all, self.current)
+    pub fn resolve_targets(&self) -> Result<Vec<&'static Target>, AppError> {
+        registry::resolve(&self.targets, self.all, self.current)
     }
 
     pub fn interactive(&self) -> bool {
-        !self.all && self.categories.is_empty()
+        !self.all && self.targets.is_empty()
     }
 }

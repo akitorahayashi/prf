@@ -40,9 +40,9 @@ fn try_execute() -> Result<(), AppError> {
 
     match cli.command {
         Commands::Scan(args) => {
-            let categories = args.resolve_categories()?;
+            let targets = args.resolve_targets()?;
             let options = app::scan::ScanOptions {
-                categories,
+                targets,
                 roots: resolve_roots_with_current(&args.paths, args.current)?,
                 verbose: args.verbose,
                 current: args.current,
@@ -55,9 +55,9 @@ fn try_execute() -> Result<(), AppError> {
         }
         Commands::Run(args) => {
             let interactive = args.interactive();
-            let categories = args.resolve_categories()?;
+            let targets = args.resolve_targets()?;
             let options = app::run::RunOptions {
-                categories,
+                targets,
                 interactive,
                 roots: resolve_roots_with_current(&args.paths, args.current)?,
                 verbose: args.verbose,

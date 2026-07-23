@@ -6,7 +6,9 @@ Testing is organized by ownership boundary and externally observable behavior:
 
 | Boundary | Location | Purpose |
 |---|---|---|
-| Owner unit tests | `src/app/**/*.rs`, `src/targets/**/*.rs`, `src/fs/**/*.rs` | Owner-local behavior verification inside `#[cfg(test)]` blocks |
+| Cleanup contract tests | `src/cleanup/**/*.rs` | Standard discovery, measurement, and action-application behavior |
+| Target protocol tests | `src/targets/**/*.rs` | Registry invariants and target-specific parsing behavior |
+| Filesystem tests | `src/fs/**/*.rs` | Root, size, and mutation mechanics |
 | Integration tests | `tests/cli.rs` (with `tests/cli/`), `tests/runtime.rs`, `tests/safety.rs` | CLI contract verification through compiled binary execution |
 
 ## Principles
@@ -34,5 +36,5 @@ cargo test --test safety
 Run a specific module test:
 
 ```bash
-cargo test app::scan::tests
+cargo test cleanup::discovery::tests
 ```

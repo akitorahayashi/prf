@@ -2,14 +2,14 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Args};
 
+use crate::cleanup::Target;
 use crate::error::AppError;
-use crate::targets::catalog;
-use crate::targets::category::Category;
+use crate::targets::registry;
 
 #[derive(Args)]
 pub struct ScanArgs {
-    #[arg(short = 't', long = "type", value_name = "CATEGORY", action = ArgAction::Append, conflicts_with = "all")]
-    pub categories: Vec<Category>,
+    #[arg(short = 't', long = "type", value_name = "TARGET", action = ArgAction::Append, conflicts_with = "all")]
+    pub targets: Vec<String>,
 
     #[arg(long = "all", action = ArgAction::SetTrue)]
     pub all: bool,
@@ -28,7 +28,7 @@ pub struct ScanArgs {
 }
 
 impl ScanArgs {
-    pub fn resolve_categories(&self) -> Result<Vec<Category>, AppError> {
-        catalog::resolve(&self.categories, self.all, self.current)
+    pub fn resolve_targets(&self) -> Result<Vec<&'static Target>, AppError> {
+        registry::resolve(&self.targets, self.all, self.current)
     }
 }

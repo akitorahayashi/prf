@@ -1,9 +1,8 @@
-pub mod brew;
-pub mod catalog;
-pub mod category;
-pub mod docker;
-pub mod item;
-pub mod name_matcher;
-pub mod rust;
-pub mod target;
-pub mod xcode;
+mod brew;
+mod docker;
+mod nodejs;
+mod python;
+mod rust;
+mod xcode;
+
+pub mod registry;

@@ -1,23 +1,22 @@
 use std::io::{self, Write};
 
+use crate::cleanup::{ScanReport, Target};
 use crate::error::AppError;
-use crate::report::ScanReport;
-use crate::targets::category::Category;
 
 use super::bytes::format_bytes;
 
-pub fn prompt_for_categories(
+pub fn prompt_for_targets<'a>(
     report: &ScanReport,
-    available_categories: &[Category],
-) -> Result<Vec<Category>, AppError> {
+    available_targets: &[&'a Target],
+) -> Result<Vec<&'a Target>, AppError> {
     println!(
-        "Select categories to delete (comma separated names or numbers). Type 'all' to select everything or press Enter to cancel."
+        "Select targets to delete (comma separated names or numbers). Type 'all' to select everything or press Enter to cancel."
     );
 
-    for (index, category) in available_categories.iter().enumerate() {
-        let report = report.report_for(*category);
-        let size = report.map(|value| value.total_size()).unwrap_or_default();
-        println!("  [{}] {:<8} {:>10}", index + 1, category, format_bytes(size));
+    for (index, target) in available_targets.iter().enumerate() {
+        let size =
+            report.report_for(target.id()).map(|value| value.total_size()).unwrap_or_default();
+        println!("  [{}] {:<8} {:>10}", index + 1, target, format_bytes(size));
     }
 
     print!("Selection: ");
@@ -26,13 +25,13 @@ pub fn prompt_for_categories(
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
 
-    parse_selection(&input, available_categories)
+    parse_selection(&input, available_targets)
 }
 
-/// Parses an interactive selection line into categories. Accepts 1-based indices, category
-/// names, and `all`; blank input (or only separators) cancels. A token mixing digits and
-/// letters is rejected rather than partially matched.
-pub fn parse_selection(input: &str, available: &[Category]) -> Result<Vec<Category>, AppError> {
+pub fn parse_selection<'a>(
+    input: &str,
+    available: &[&'a Target],
+) -> Result<Vec<&'a Target>, AppError> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return Err(AppError::Cancelled);
@@ -50,22 +49,24 @@ pub fn parse_selection(input: &str, available: &[Category]) -> Result<Vec<Catego
 
         if let Ok(index) = token.parse::<usize>() {
             if index < 1 || index > available.len() {
-                return Err(AppError::CategoryIndexOutOfRange(token.to_string()));
+                return Err(AppError::TargetIndexOutOfRange(token.to_string()));
             }
             push_unique(&mut selected, available[index - 1]);
             continue;
         }
 
-        if token.chars().any(|ch| ch.is_ascii_digit())
-            && token.chars().any(|ch| ch.is_ascii_alphabetic())
+        if token.chars().any(|character| character.is_ascii_digit())
+            && token.chars().any(|character| character.is_ascii_alphabetic())
         {
-            return Err(AppError::InvalidCategory(token.to_string()));
+            return Err(AppError::InvalidTarget(token.to_string()));
         }
 
-        match Category::from_name(token) {
-            Some(category) if available.contains(&category) => push_unique(&mut selected, category),
-            _ => return Err(AppError::InvalidCategory(token.to_string())),
-        }
+        let target = available
+            .iter()
+            .copied()
+            .find(|target| target.id().as_str().eq_ignore_ascii_case(token))
+            .ok_or_else(|| AppError::InvalidTarget(token.to_string()))?;
+        push_unique(&mut selected, target);
     }
 
     if selected.is_empty() {
@@ -75,9 +76,9 @@ pub fn parse_selection(input: &str, available: &[Category]) -> Result<Vec<Catego
     Ok(selected)
 }
 
-fn push_unique(selected: &mut Vec<Category>, category: Category) {
-    if !selected.contains(&category) {
-        selected.push(category);
+fn push_unique<'a>(selected: &mut Vec<&'a Target>, target: &'a Target) {
+    if !selected.iter().any(|existing| existing.id() == target.id()) {
+        selected.push(target);
     }
 }
 
@@ -95,76 +96,83 @@ pub fn confirm_deletion(total_size: u64) -> Result<bool, AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::targets::registry;
 
-    const AVAILABLE: [Category; 3] = [Category::Xcode, Category::Python, Category::Rust];
+    fn available() -> Vec<&'static Target> {
+        ["xcode", "python", "rust"]
+            .iter()
+            .map(|name| registry::find(name).expect("registered target"))
+            .collect()
+    }
+
+    fn ids(targets: &[&Target]) -> Vec<&'static str> {
+        targets.iter().map(|target| target.id().as_str()).collect()
+    }
 
     #[test]
     fn parses_indices() {
-        assert_eq!(
-            parse_selection("1,3", &AVAILABLE).expect("valid indices"),
-            vec![Category::Xcode, Category::Rust]
-        );
+        let available = available();
+        let selected = parse_selection("1,3", &available).expect("valid indices");
+        assert_eq!(ids(&selected), vec!["xcode", "rust"]);
     }
 
     #[test]
     fn parses_names() {
-        assert_eq!(
-            parse_selection("python,rust", &AVAILABLE).expect("valid names"),
-            vec![Category::Python, Category::Rust]
-        );
+        let available = available();
+        let selected = parse_selection("python,rust", &available).expect("valid names");
+        assert_eq!(ids(&selected), vec!["python", "rust"]);
     }
 
     #[test]
     fn parses_mixed_names_and_indices() {
-        assert_eq!(
-            parse_selection("1,rust", &AVAILABLE).expect("valid mix"),
-            vec![Category::Xcode, Category::Rust]
-        );
+        let available = available();
+        let selected = parse_selection("1,rust", &available).expect("valid mix");
+        assert_eq!(ids(&selected), vec!["xcode", "rust"]);
     }
 
     #[test]
     fn collapses_duplicates() {
-        assert_eq!(
-            parse_selection("1,xcode,1", &AVAILABLE).expect("valid duplicates"),
-            vec![Category::Xcode]
-        );
+        let available = available();
+        let selected = parse_selection("1,xcode,1", &available).expect("valid duplicates");
+        assert_eq!(ids(&selected), vec!["xcode"]);
     }
 
     #[test]
     fn all_selects_everything_case_insensitively() {
-        assert_eq!(parse_selection("ALL", &AVAILABLE).expect("all"), AVAILABLE.to_vec());
+        let available = available();
+        assert_eq!(ids(&parse_selection("ALL", &available).expect("all")), ids(&available));
     }
 
     #[test]
     fn blank_input_cancels() {
-        assert!(matches!(parse_selection("   ", &AVAILABLE), Err(AppError::Cancelled)));
+        assert!(matches!(parse_selection("   ", &available()), Err(AppError::Cancelled)));
     }
 
     #[test]
-    fn only_separators_cancels() {
-        assert!(matches!(parse_selection(", ,", &AVAILABLE), Err(AppError::Cancelled)));
+    fn only_separators_cancel() {
+        assert!(matches!(parse_selection(", ,", &available()), Err(AppError::Cancelled)));
     }
 
     #[test]
     fn out_of_range_index_is_rejected() {
         assert!(matches!(
-            parse_selection("9", &AVAILABLE),
-            Err(AppError::CategoryIndexOutOfRange(_))
+            parse_selection("9", &available()),
+            Err(AppError::TargetIndexOutOfRange(_))
         ));
     }
 
     #[test]
     fn unknown_name_is_rejected() {
-        assert!(matches!(parse_selection("java", &AVAILABLE), Err(AppError::InvalidCategory(_))));
+        assert!(matches!(parse_selection("java", &available()), Err(AppError::InvalidTarget(_))));
     }
 
     #[test]
-    fn known_name_not_available_is_rejected() {
-        assert!(matches!(parse_selection("docker", &AVAILABLE), Err(AppError::InvalidCategory(_))));
+    fn registered_but_unavailable_name_is_rejected() {
+        assert!(matches!(parse_selection("docker", &available()), Err(AppError::InvalidTarget(_))));
     }
 
     #[test]
     fn digit_alpha_token_is_rejected() {
-        assert!(matches!(parse_selection("1a", &AVAILABLE), Err(AppError::InvalidCategory(_))));
+        assert!(matches!(parse_selection("1a", &available()), Err(AppError::InvalidTarget(_))));
     }
 }

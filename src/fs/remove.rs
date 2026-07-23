@@ -5,35 +5,30 @@ use std::path::Path;
 use walkdir::WalkDir;
 
 use crate::error::AppError;
-use crate::targets::item::ItemKind;
 
-/// Best-effort removal of a filesystem item. An already-missing path is not an error; a
-/// directory left non-empty after the cleanup pass is skipped (logged under verbose) rather
-/// than aborting, and callers determine the outcome from whether the path still exists.
-pub fn remove_item(path: &Path, kind: ItemKind, verbose: bool) -> Result<(), AppError> {
-    match kind {
-        ItemKind::Directory => safe_remove_dir_all(path, verbose),
-        ItemKind::File => match fs::remove_file(path) {
-            Ok(()) => Ok(()),
-            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(err) => Err(AppError::Io(err)),
-        },
+pub fn remove_file(path: &Path) -> Result<(), AppError> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(AppError::Io(err)),
     }
 }
 
-pub fn safe_remove_dir_all(path: &Path, verbose: bool) -> Result<(), AppError> {
+pub fn safe_remove_dir_all(path: &Path) -> Result<(), AppError> {
     let mut files_to_remove = Vec::new();
     let mut dirs_to_remove = Vec::new();
 
     for entry_result in WalkDir::new(path).into_iter() {
         let entry = match entry_result {
             Ok(entry) => entry,
-            Err(err) => {
-                if verbose {
-                    eprintln!("Skipping due to error: {}", err);
-                }
+            Err(error)
+                if error
+                    .io_error()
+                    .is_some_and(|source| source.kind() == io::ErrorKind::NotFound) =>
+            {
                 continue;
             }
+            Err(error) => return Err(AppError::Io(io::Error::other(error))),
         };
 
         if entry.file_type().is_file() || entry.file_type().is_symlink() {
@@ -56,14 +51,7 @@ pub fn safe_remove_dir_all(path: &Path, verbose: bool) -> Result<(), AppError> {
         match fs::remove_dir(dir) {
             Ok(()) => {}
             Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-            Err(err) if err.kind() == io::ErrorKind::DirectoryNotEmpty => {
-                if verbose {
-                    eprintln!(
-                        "Directory not empty after cleanup pass, skipping: {}",
-                        dir.display()
-                    );
-                }
-            }
+            Err(err) if err.kind() == io::ErrorKind::DirectoryNotEmpty => {}
             Err(err) => return Err(AppError::Io(err)),
         }
     }

@@ -84,3 +84,43 @@ exit 0
         .stdout(predicate::str::contains("Unused images"))
         .stdout(predicate::str::contains("Build cache"));
 }
+
+#[test]
+fn scan_reports_missing_docker_as_a_diagnostic() {
+    let ctx = TestContext::new();
+
+    ctx.cli()
+        .arg("scan")
+        .arg("--type")
+        .arg("docker")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Docker CLI is unavailable"));
+}
+
+#[test]
+fn scan_rejects_malformed_docker_output() {
+    let ctx = TestContext::new();
+    ctx.create_mock_command(
+        "docker",
+        r#"#!/bin/sh
+if [ "$1" = "info" ]; then
+  exit 0
+fi
+if [ "$1" = "system" ] && [ "$2" = "df" ]; then
+  echo 'not-json'
+  exit 0
+fi
+exit 0
+"#,
+    );
+
+    ctx.cli()
+        .arg("scan")
+        .arg("--type")
+        .arg("docker")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Discovery failed"))
+        .stderr(predicate::str::contains("not valid JSON"));
+}

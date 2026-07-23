@@ -1,161 +1,154 @@
-use std::io;
-use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::io::ErrorKind;
+use std::process::Command;
 
 use byte_unit::Byte;
 
+use crate::cleanup::{
+    Candidate, Discovery, Inspection, Listing, Scope, ScopeSupport, Target, TargetId,
+};
 use crate::error::AppError;
 
-use super::category::Category;
-use super::item::CleanupItem;
-use super::target::{CleanupTarget, ScanScope};
+const PRUNE_ARGS: &[&str] = &["system", "prune", "-a", "-f", "--volumes"];
+const LISTINGS: &[&str] =
+    &["Unused images", "Stopped containers", "Unused volumes", "Unused networks", "Build cache"];
 
-static DOCKER_AVAILABLE: OnceLock<bool> = OnceLock::new();
+pub(super) static TARGET: Target = Target::new(
+    TargetId::new("docker"),
+    "Docker",
+    ScopeSupport::DefaultOnly,
+    Discovery::Inspector(inspect),
+);
 
-fn probe_docker_available() -> bool {
-    Command::new("docker")
-        .arg("info")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
+fn inspect(target: TargetId, _scope: &Scope) -> Result<Inspection, AppError> {
+    let availability = match Command::new("docker").arg("info").output() {
+        Ok(output) => output,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Ok(Inspection::diagnostic("Docker CLI is unavailable"));
+        }
+        Err(error) => return Err(AppError::Io(error)),
+    };
 
-fn docker_available() -> bool {
-    *DOCKER_AVAILABLE.get_or_init(probe_docker_available)
-}
-
-fn parse_reclaimable_size(size_token: &str) -> Option<Byte> {
-    if let Ok(size) = Byte::parse_str(size_token, true) {
-        return Some(size);
+    if !availability.status.success() {
+        let stderr = String::from_utf8_lossy(&availability.stderr);
+        let detail = stderr.trim();
+        return Ok(Inspection::diagnostic(if detail.is_empty() {
+            format!("Docker daemon is unavailable: {}", availability.status)
+        } else {
+            format!("Docker daemon is unavailable: {detail}")
+        }));
     }
 
-    let split_index = size_token
+    let output =
+        Command::new("docker").args(["system", "df", "--format", "{{json .}}"]).output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let detail = stderr.trim();
+        return Err(AppError::Discovery(if detail.is_empty() {
+            format!("docker system df failed with status {}", output.status)
+        } else {
+            format!("docker system df failed: {detail}")
+        }));
+    }
+
+    let stdout = String::from_utf8(output.stdout).map_err(|error| {
+        AppError::Discovery(format!("docker system df returned invalid UTF-8: {error}"))
+    })?;
+    let reclaimable = parse_reclaimable_total(&stdout)?;
+    let candidates = if reclaimable == 0 {
+        Vec::new()
+    } else {
+        vec![Candidate::process(
+            target,
+            "Docker reclaimable (docker system prune)",
+            "docker",
+            PRUNE_ARGS,
+            reclaimable,
+        )]
+    };
+
+    Ok(Inspection {
+        candidates,
+        listings: LISTINGS.iter().map(|label| Listing::Detail((*label).to_string())).collect(),
+        diagnostics: Vec::new(),
+    })
+}
+
+fn parse_reclaimable_total(stdout: &str) -> Result<u64, AppError> {
+    let mut total = 0u64;
+    for (index, line) in stdout.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        let json: serde_json::Value = serde_json::from_str(line).map_err(|error| {
+            AppError::Discovery(format!(
+                "docker system df line {} is not valid JSON: {error}",
+                index + 1
+            ))
+        })?;
+        let reclaimable =
+            json.get("Reclaimable").and_then(serde_json::Value::as_str).ok_or_else(|| {
+                AppError::Discovery(format!(
+                    "docker system df line {} has no string Reclaimable field",
+                    index + 1
+                ))
+            })?;
+        let token = reclaimable.split_whitespace().next().ok_or_else(|| {
+            AppError::Discovery(format!(
+                "docker system df line {} has an empty Reclaimable field",
+                index + 1
+            ))
+        })?;
+        total = total.saturating_add(parse_reclaimable_size(token)?.as_u64());
+    }
+    Ok(total)
+}
+
+fn parse_reclaimable_size(token: &str) -> Result<Byte, AppError> {
+    if let Ok(size) = Byte::parse_str(token, true) {
+        return Ok(size);
+    }
+
+    let split_index = token
         .char_indices()
-        .find(|(_, ch)| !(ch.is_ascii_digit() || *ch == '.'))
-        .map(|(index, _)| index)?;
-
-    let (num, unit) = size_token.split_at(split_index);
-    if num.is_empty() || unit.trim().is_empty() {
-        return None;
+        .find(|(_, character)| !(character.is_ascii_digit() || *character == '.'))
+        .map(|(index, _)| index)
+        .ok_or_else(|| AppError::Discovery(format!("invalid Docker size '{token}'")))?;
+    let (number, unit) = token.split_at(split_index);
+    if number.is_empty() || unit.trim().is_empty() {
+        return Err(AppError::Discovery(format!("invalid Docker size '{token}'")));
     }
 
-    let normalized = format!("{} {}", num, unit.trim());
-    Byte::parse_str(&normalized, true).ok()
+    Byte::parse_str(format!("{} {}", number, unit.trim()), true)
+        .map_err(|error| AppError::Discovery(format!("invalid Docker size '{token}': {error}")))
 }
 
-pub fn run_cleanup(verbose: bool) -> Result<(), AppError> {
-    if !docker_available() {
-        return Err(io::Error::new(io::ErrorKind::NotFound, "Docker CLI not available").into());
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_reclaimable_sizes_from_json_lines() {
+        let total = parse_reclaimable_total(
+            "{\"Type\":\"Images\",\"Reclaimable\":\"1.5GB (50%)\"}\n\
+             {\"Type\":\"Containers\",\"Reclaimable\":\"500MB\"}\n",
+        )
+        .expect("Docker output parses");
+
+        assert_eq!(total, 2_000_000_000);
     }
 
-    let args = ["system", "prune", "-a", "-f", "--volumes"];
-    if verbose {
-        println!("$ docker {}", args.join(" "));
+    #[test]
+    fn malformed_json_is_an_explicit_failure() {
+        assert!(matches!(parse_reclaimable_total("not-json"), Err(AppError::Discovery(_))));
     }
 
-    let status = Command::new("docker").args(args).status()?;
-    if !status.success() {
-        return Err(io::Error::other(format!(
-            "docker {} failed with status {}",
-            args.join(" "),
-            status
-        ))
-        .into());
-    }
-
-    Ok(())
-}
-
-pub struct DockerTarget;
-
-impl DockerTarget {
-    pub fn new() -> Self {
-        Self
-    }
-
-    fn available(&self) -> bool {
-        docker_available()
-    }
-}
-
-impl Default for DockerTarget {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl CleanupTarget for DockerTarget {
-    fn category(&self) -> Category {
-        Category::Docker
-    }
-
-    fn discover(&self, scope: &ScanScope) -> Result<Vec<CleanupItem>, AppError> {
-        if !self.available() {
-            if scope.verbose() {
-                println!("Docker CLI not available, skipping Docker scan.");
-            }
-            return Ok(Vec::new());
-        }
-
-        let output =
-            Command::new("docker").args(["system", "df", "--format", "{{json .}}"]).output()?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let message = if stderr.trim().is_empty() {
-                format!("'docker system df' exited with status {}", output.status)
-            } else {
-                format!("'docker system df' failed: {}", stderr.trim())
-            };
-            if scope.verbose() {
-                eprintln!("{message}");
-            }
-            return Ok(Vec::new());
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let mut total = 0u64;
-
-        for line in stdout.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-
-            let parsed = serde_json::from_str::<serde_json::Value>(line).ok();
-            let Some(json) = parsed else {
-                continue;
-            };
-
-            let Some(reclaimable_str) = json.get("Reclaimable").and_then(|value| value.as_str())
-            else {
-                continue;
-            };
-
-            let Some(size_token) = reclaimable_str.split_whitespace().next() else {
-                continue;
-            };
-
-            if let Some(size) = parse_reclaimable_size(size_token) {
-                total = total.saturating_add(size.as_u64());
-            }
-        }
-
-        if total == 0 { Ok(Vec::new()) } else { Ok(vec![CleanupItem::docker_prune(total)]) }
-    }
-
-    fn list(&self, _scope: &ScanScope) -> Result<Vec<String>, AppError> {
-        if !self.available() {
-            return Ok(Vec::new());
-        }
-
-        Ok(vec![
-            "Unused images".to_string(),
-            "Stopped containers".to_string(),
-            "Unused volumes".to_string(),
-            "Unused networks".to_string(),
-            "Build cache".to_string(),
-        ])
+    #[test]
+    fn missing_reclaimable_field_is_an_explicit_failure() {
+        assert!(matches!(
+            parse_reclaimable_total("{\"Type\":\"Images\"}"),
+            Err(AppError::Discovery(_))
+        ));
     }
 }

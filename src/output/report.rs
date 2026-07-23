@@ -1,11 +1,8 @@
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use dirs_next as dirs;
 
-use crate::report::ScanReport;
-use crate::targets::category::Category;
-use crate::targets::item::{CleanupAction, CleanupItem};
+use crate::cleanup::{Action, Inspection, Listing, ScanReport, Target};
 
 use super::bytes::format_bytes;
 
@@ -19,27 +16,36 @@ pub fn display_path(path: &Path) -> String {
     path.display().to_string()
 }
 
-fn item_display(item: &CleanupItem) -> String {
-    match &item.action {
-        CleanupAction::Path { path, .. } => display_path(path),
-        CleanupAction::DockerPrune => "Docker reclaimable (docker system prune)".to_string(),
+fn candidate_display(action: &Action) -> String {
+    match action {
+        Action::RemovePath { path, .. } => display_path(path),
+        Action::RunProcess { label, .. } => (*label).to_string(),
     }
 }
 
-pub fn print_scan_report(report: &ScanReport, categories: &[Category], verbose: bool) {
+pub fn print_diagnostics(inspections: &[Inspection]) {
+    for diagnostic in inspections.iter().flat_map(|inspection| &inspection.diagnostics) {
+        eprintln!("Warning: {}", diagnostic.message);
+    }
+}
+
+pub fn print_scan_report(report: &ScanReport, targets: &[&Target], verbose: bool) {
     println!("Scan results:");
-    for category in categories {
-        if let Some(category_report) = report.report_for(*category) {
-            let total = category_report.total_size();
+    for target in targets {
+        if let Some(target_report) = report.report_for(target.id()) {
             println!(
                 "- {:<8} {:>10} across {} item(s)",
-                category.display_name(),
-                format_bytes(total),
-                category_report.items.len()
+                target.display_name(),
+                format_bytes(target_report.total_size()),
+                target_report.candidates.len()
             );
             if verbose {
-                for item in &category_report.items {
-                    println!("    • {:<60} {}", item_display(item), format_bytes(item.size));
+                for candidate in &target_report.candidates {
+                    println!(
+                        "    • {:<60} {}",
+                        candidate_display(&candidate.action),
+                        format_bytes(candidate.estimated_size())
+                    );
                 }
             }
         }
@@ -47,34 +53,49 @@ pub fn print_scan_report(report: &ScanReport, categories: &[Category], verbose: 
     println!("Total reclaimable: {}", format_bytes(report.total_size()));
 }
 
-pub fn print_list_results(results: &BTreeMap<Category, Vec<String>>) {
+pub fn print_list_results(targets: &[&Target], inspections: &[Inspection]) {
     println!("Found cleanup targets:");
-    for (category, targets) in results {
-        if !targets.is_empty() {
-            println!("【{}】", category.display_name());
-            for target in targets {
-                println!("- {}", target);
-            }
-            println!();
+    for (target, inspection) in targets.iter().zip(inspections) {
+        if inspection.listings.is_empty() {
+            continue;
         }
+
+        println!("【{}】", target.display_name());
+        for listing in &inspection.listings {
+            match listing {
+                Listing::Count { label, count } => println!(
+                    "- {} ({} location{} found)",
+                    label,
+                    count,
+                    if *count == 1 { "" } else { "s" }
+                ),
+                Listing::Path(path) => println!("- {} (exists)", path.display()),
+                Listing::Detail(detail) => println!("- {detail}"),
+            }
+        }
+        println!();
     }
 }
 
-pub fn print_deletion_plan(report: &ScanReport, categories: &[Category], verbose: bool) {
+pub fn print_deletion_plan(report: &ScanReport, targets: &[&Target], verbose: bool) {
     println!("Deletion plan:");
-    for category in categories {
-        if let Some(category_report) = report.report_for(*category) {
+    for target in targets {
+        if let Some(target_report) = report.report_for(target.id()) {
             println!(
                 "- {:<8} {:>10} across {} item(s)",
-                category.display_name(),
-                format_bytes(category_report.total_size()),
-                category_report.items.len()
+                target.display_name(),
+                format_bytes(target_report.total_size()),
+                target_report.candidates.len()
             );
-            for item in &category_report.items {
+            for candidate in &target_report.candidates {
                 if verbose {
-                    println!("    • {:<60} {}", item_display(item), format_bytes(item.size));
+                    println!(
+                        "    • {:<60} {}",
+                        candidate_display(&candidate.action),
+                        format_bytes(candidate.estimated_size())
+                    );
                 } else {
-                    println!("    • {}", item_display(item));
+                    println!("    • {}", candidate_display(&candidate.action));
                 }
             }
         }

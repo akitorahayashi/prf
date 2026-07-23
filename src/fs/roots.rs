@@ -19,11 +19,7 @@ pub fn resolve_roots_with_current(
 ) -> Result<Vec<PathBuf>, AppError> {
     debug_assert!(!current || explicit.is_empty());
 
-    if current {
-        Ok(vec![std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))])
-    } else {
-        resolve_roots(explicit)
-    }
+    if current { Ok(vec![std::env::current_dir()?]) } else { resolve_roots(explicit) }
 }
 
 #[cfg(test)]
@@ -41,7 +37,7 @@ mod tests {
         fn new() -> Self {
             Self {
                 home: std::env::var("HOME").ok(),
-                cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+                cwd: std::env::current_dir().expect("current directory is available"),
             }
         }
     }
