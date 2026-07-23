@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::error::AppError;
 
 use super::category::Category;
-use super::item::{CleanupItem, PathAuthority};
+use super::item::CleanupItem;
 use super::target::{CleanupTarget, DiscoveryOutcome, ScanScope};
 use super::traversal::{VisitControl, visit_roots};
 
@@ -34,7 +34,7 @@ impl NameMatcherTarget {
             items.push(CleanupItem::directory(
                 self.category,
                 entry.path().to_path_buf(),
-                PathAuthority::LocalRoot(root.to_path_buf()),
+                CleanupItem::local_authority(root)?,
             ));
             Ok(VisitControl::SkipDirectory)
         })?;

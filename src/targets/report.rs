@@ -81,6 +81,12 @@ impl ScanReport {
         normalize_candidates(selected)
     }
 
+    pub fn has_candidates_for(&self, categories: &[Category]) -> bool {
+        self.candidates
+            .iter()
+            .any(|item| categories.iter().any(|category| item.has_category(*category)))
+    }
+
     pub fn subset(&self, categories: &[Category]) -> Self {
         let selected_categories = self
             .categories
@@ -179,7 +185,14 @@ mod tests {
 
     fn directory(category: Category, path: &str) -> CleanupItem {
         let path = PathBuf::from(path);
-        CleanupItem::directory(category, path.clone(), PathAuthority::LocalRoot(PathBuf::from("/")))
+        CleanupItem::directory(
+            category,
+            path,
+            PathAuthority::LocalRoot {
+                path: PathBuf::from("/"),
+                identity: FileIdentity { device: 1, inode: 1 },
+            },
+        )
     }
 
     #[test]
@@ -220,5 +233,17 @@ mod tests {
         report.record_complete(Category::Nodejs, vec![second]);
 
         assert_eq!(report.total_size(), 4096);
+    }
+
+    #[test]
+    fn zero_size_item_remains_a_cleanup_candidate() {
+        let mut report = ScanReport::new();
+        report.record_complete(
+            Category::Nodejs,
+            vec![directory(Category::Nodejs, "/workspace/node_modules")],
+        );
+
+        assert_eq!(report.total_size(), 0);
+        assert!(report.has_candidates_for(&[Category::Nodejs]));
     }
 }

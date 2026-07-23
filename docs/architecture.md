@@ -77,6 +77,7 @@ tests/
 - Provider discovery is parallel while report and plan ordering remains deterministic.
 - `run` applies scan, selection, plan normalization, display, confirmation, revalidation, execution,
   and summary phases.
+- Run no-op decisions use candidate presence; measured bytes are informational and may be zero.
 - Duplicate and nested paths are normalized after category selection.
 - Docker cleanup is a typed external action owned by `targets/docker.rs` and never enters filesystem
   deletion.
@@ -88,5 +89,7 @@ tests/
 - Deletion requires explicit confirmation unless `-y/--yes` is provided.
 - Current-directory mode excludes system-wide categories (`brew` and `docker`).
 - Deletion touches only displayed plan entries.
-- Filesystem kind, identity, and authority are revalidated immediately before removal.
+- Filesystem removal stays relative to verified, open authority directories and revalidates kind and
+  identity immediately before removal.
+- Measurement and deletion remain on the authority filesystem and reject device-boundary crossings.
 - Symbolic links are never followed during discovery, measurement, or deletion.

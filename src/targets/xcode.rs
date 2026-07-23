@@ -92,7 +92,7 @@ impl XcodeTarget {
         visit_roots(scope, |root, entry| {
             let path = entry.path();
             let file_name = entry.file_name().to_string_lossy();
-            let authority = PathAuthority::LocalRoot(root.to_path_buf());
+            let authority = CleanupItem::local_authority(root)?;
 
             if entry.file_type().is_dir() && file_name == "DerivedData" {
                 self.add_path(path, authority, &mut items)?;

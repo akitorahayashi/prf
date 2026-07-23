@@ -17,7 +17,7 @@ where
     F: FnMut(&Path, &DirEntry) -> Result<VisitControl, AppError>,
 {
     for root in scope.roots() {
-        let mut walker = WalkDir::new(root).follow_links(false).into_iter();
+        let mut walker = WalkDir::new(root).follow_links(false).same_file_system(true).into_iter();
         while let Some(entry) = walker.next() {
             let entry = entry.map_err(|error| AppError::Traversal {
                 path: error.path().map(Path::to_path_buf).unwrap_or_else(|| root.clone()),

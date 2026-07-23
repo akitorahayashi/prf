@@ -8,7 +8,9 @@ use crate::error::AppError;
 use crate::fs::remove::{RemovalOutcome, remove_candidate};
 use crate::output::progress::deletion_progress_style;
 use crate::output::prompt::{confirm_deletion, prompt_for_categories};
-use crate::output::report::{print_cleanup_failure, print_cleanup_summary, print_deletion_plan};
+use crate::output::report::{
+    print_cleanup_failure, print_cleanup_summary, print_deletion_plan, print_unavailable_categories,
+};
 use crate::targets::catalog::RequestOrigin;
 use crate::targets::category::Category;
 use crate::targets::docker;
@@ -38,9 +40,10 @@ pub fn execute(options: RunOptions) -> Result<(), AppError> {
     let progress = Arc::new(MultiProgress::new());
     let report = scan_categories(&options.categories, &scope, &progress, true);
     validate_report(&report, &options.categories, options.request_origin)?;
+    print_unavailable_categories(&report, &options.categories);
 
-    if report.total_size() == 0 {
-        println!("Nothing to delete. All selected categories are already clean.");
+    if !report.has_candidates_for(&options.categories) {
+        println!("No cleanup candidates were found.");
         return Ok(());
     }
 
@@ -59,8 +62,8 @@ pub fn execute(options: RunOptions) -> Result<(), AppError> {
     };
 
     let subset = report.subset(&selected_categories);
-    if subset.total_size() == 0 {
-        println!("Nothing to delete. All selected categories are already clean.");
+    if subset.is_empty() {
+        println!("No cleanup candidates were selected.");
         return Ok(());
     }
 
@@ -164,13 +167,14 @@ mod tests {
     use assert_fs::prelude::*;
 
     use super::*;
-    use crate::targets::item::{CleanupItem, PathAuthority};
+    use crate::targets::item::CleanupItem;
 
     fn scanned_item(path: &std::path::Path, root: &std::path::Path) -> CleanupItem {
         CleanupItem::from_path(
             Category::Nodejs,
             std::fs::canonicalize(path).expect("candidate canonicalizes"),
-            PathAuthority::LocalRoot(std::fs::canonicalize(root).expect("root canonicalizes")),
+            CleanupItem::local_authority(&std::fs::canonicalize(root).expect("root canonicalizes"))
+                .expect("authority resolves"),
         )
         .expect("candidate is scanned")
     }

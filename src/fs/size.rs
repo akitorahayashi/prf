@@ -15,8 +15,14 @@ pub struct MeasuredPath {
     pub allocations: Vec<Allocation>,
 }
 
-pub fn path_allocations(path: &Path) -> Result<MeasuredPath, AppError> {
+pub fn path_allocations(path: &Path, authority_device: u64) -> Result<MeasuredPath, AppError> {
     let metadata = fs::symlink_metadata(path).map_err(|error| measurement_error(path, error))?;
+    if metadata.dev() != authority_device {
+        return Err(AppError::Measurement {
+            path: path.to_path_buf(),
+            reason: "candidate is on a different filesystem than its authority".to_string(),
+        });
+    }
     let identity = file_identity(&metadata);
     if !metadata.is_dir() {
         return Ok(MeasuredPath { identity, allocations: vec![allocation(&metadata)] });
@@ -25,13 +31,16 @@ pub fn path_allocations(path: &Path) -> Result<MeasuredPath, AppError> {
     let mut seen = BTreeSet::new();
     let mut allocations = Vec::new();
 
-    for entry in WalkDir::new(path).follow_links(false) {
+    for entry in WalkDir::new(path).follow_links(false).same_file_system(true) {
         let entry = entry.map_err(|error| AppError::Measurement {
             path: error.path().map(Path::to_path_buf).unwrap_or_else(|| path.to_path_buf()),
             reason: error.to_string(),
         })?;
         let metadata = fs::symlink_metadata(entry.path())
             .map_err(|error| measurement_error(entry.path(), error))?;
+        if metadata.dev() != authority_device {
+            continue;
+        }
         let allocation = allocation(&metadata);
         if seen.insert(allocation.identity) {
             allocations.push(allocation);
@@ -72,7 +81,8 @@ mod tests {
         let second = temp.child("second.bin");
         std::fs::hard_link(first.path(), second.path()).expect("hard link exists");
 
-        let measured = path_allocations(temp.path()).expect("directory is measured");
+        let device = temp.metadata().expect("metadata exists").dev();
+        let measured = path_allocations(temp.path(), device).expect("directory is measured");
         let file_identity = FileIdentity {
             device: first.metadata().expect("metadata exists").dev(),
             inode: first.metadata().expect("metadata exists").ino(),
@@ -98,7 +108,8 @@ mod tests {
         outside.child("large.bin").write_binary(&vec![1; 32 * 1024]).expect("outside file exists");
         symlink(outside.path(), temp.child("linked").path()).expect("symlink exists");
 
-        let measured = path_allocations(temp.path()).expect("directory is measured");
+        let device = temp.metadata().expect("metadata exists").dev();
+        let measured = path_allocations(temp.path(), device).expect("directory is measured");
         let outside_identity = FileIdentity {
             device: outside.child("large.bin").metadata().expect("metadata exists").dev(),
             inode: outside.child("large.bin").metadata().expect("metadata exists").ino(),
@@ -107,5 +118,16 @@ mod tests {
         assert!(
             !measured.allocations.iter().any(|allocation| allocation.identity == outside_identity)
         );
+    }
+
+    #[test]
+    fn path_allocations_reject_different_authority_device() {
+        let temp = TempDir::new().expect("temp directory is created");
+        let actual_device = temp.metadata().expect("metadata exists").dev();
+
+        assert!(matches!(
+            path_allocations(temp.path(), actual_device.wrapping_add(1)),
+            Err(AppError::Measurement { .. })
+        ));
     }
 }

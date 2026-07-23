@@ -144,7 +144,7 @@ fn measure_candidates(report: &mut ScanReport, progress: &Arc<MultiProgress>) {
             continue;
         };
 
-        match path_allocations(&candidate.path) {
+        match path_allocations(&candidate.path, candidate.authority.device()) {
             Ok(measured) => {
                 item.set_identity(measured.identity);
                 item.set_allocations(measured.allocations);
@@ -193,7 +193,7 @@ mod tests {
     use assert_fs::TempDir;
     use assert_fs::prelude::*;
 
-    use crate::targets::item::{CleanupItem, PathAuthority};
+    use crate::targets::item::CleanupItem;
 
     use super::*;
 
@@ -210,7 +210,7 @@ mod tests {
             vec![CleanupItem::directory(
                 Category::Nodejs,
                 dir.path().to_path_buf(),
-                PathAuthority::LocalRoot(temp.path().to_path_buf()),
+                CleanupItem::local_authority(temp.path()).expect("authority resolves"),
             )],
         );
 

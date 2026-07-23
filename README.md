@@ -52,8 +52,10 @@ prf scan --type python -v       # Show detailed Python cleanup targets
    allocated bytes.
 3. `--type <category>`, `--all`, and interactive selection constrain deletion scope.
 4. Deletion plans contain only scan results and display every unique path or external action.
-5. Filesystem identity, kind, and authority are revalidated before non-following removal.
-6. Destructive actions require confirmation unless `-y/--yes` is supplied.
+5. Filesystem removal is relative to verified open authority directories and rejects symbolic-link
+   and filesystem-device boundary crossings.
+6. Filesystem identity and kind are revalidated immediately before removal.
+7. Destructive actions require confirmation unless `-y/--yes` is supplied.
 
 ## Architecture
 

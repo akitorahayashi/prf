@@ -139,9 +139,32 @@ fi
         .arg(ctx.home())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Nothing to delete"));
+        .stdout(predicate::str::contains("No cleanup candidates were found"));
 
     assert!(!marker.exists(), "Docker prune must not run for a clean scan");
+}
+
+#[test]
+fn implicit_run_reports_unavailable_categories_separately_from_clean_categories() {
+    let ctx = TestContext::new();
+    ctx.create_mock_command(
+        "docker",
+        r#"#!/bin/sh
+if [ "$1" = "info" ]; then
+  exit 1
+fi
+"#,
+    );
+
+    ctx.cli()
+        .arg("run")
+        .arg("-y")
+        .arg(ctx.home())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Unavailable categories:"))
+        .stdout(predicate::str::contains("- Docker:"))
+        .stdout(predicate::str::contains("No cleanup candidates were found"));
 }
 
 #[test]

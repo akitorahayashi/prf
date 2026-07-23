@@ -115,6 +115,27 @@ pub fn print_deletion_plan(report: &ScanReport, categories: &[Category], verbose
     println!("Total to delete: {}", format_bytes(report.total_size()));
 }
 
+pub fn print_unavailable_categories(report: &ScanReport, categories: &[Category]) {
+    let unavailable = categories
+        .iter()
+        .filter_map(|category| {
+            let category_report = report.report_for(*category)?;
+            match &category_report.status {
+                CategoryStatus::Unavailable(reason) => Some((*category, reason)),
+                _ => None,
+            }
+        })
+        .collect::<Vec<_>>();
+    if unavailable.is_empty() {
+        return;
+    }
+
+    println!("Unavailable categories:");
+    for (category, reason) in unavailable {
+        println!("- {}: {reason}", category.display_name());
+    }
+}
+
 pub fn print_cleanup_summary(removed: usize, skipped: usize, failed: usize, filesystem_bytes: u64) {
     println!(
         "Cleanup summary: {removed} removed, {skipped} skipped, {failed} failed; {} estimated filesystem bytes removed.",

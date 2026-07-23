@@ -16,8 +16,17 @@ pub enum ItemKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PathAuthority {
-    LocalRoot(PathBuf),
-    UserPath { allowed: PathBuf, canonical_parent: PathBuf },
+    LocalRoot { path: PathBuf, identity: FileIdentity },
+    UserPath { allowed: PathBuf, canonical_parent: PathBuf, parent_identity: FileIdentity },
+}
+
+impl PathAuthority {
+    pub fn device(&self) -> u64 {
+        match self {
+            PathAuthority::LocalRoot { identity, .. }
+            | PathAuthority::UserPath { parent_identity: identity, .. } => identity.device,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,7 +130,31 @@ impl CleanupItem {
             path: parent.to_path_buf(),
             reason: error.to_string(),
         })?;
-        Ok(PathAuthority::UserPath { allowed: path.to_path_buf(), canonical_parent })
+        let metadata = fs::symlink_metadata(&canonical_parent).map_err(|error| {
+            AppError::Traversal { path: canonical_parent.clone(), reason: error.to_string() }
+        })?;
+        Ok(PathAuthority::UserPath {
+            allowed: path.to_path_buf(),
+            canonical_parent,
+            parent_identity: file_identity(&metadata),
+        })
+    }
+
+    pub fn local_authority(path: &Path) -> Result<PathAuthority, AppError> {
+        let metadata = fs::symlink_metadata(path).map_err(|error| AppError::Traversal {
+            path: path.to_path_buf(),
+            reason: error.to_string(),
+        })?;
+        if !metadata.is_dir() {
+            return Err(AppError::Traversal {
+                path: path.to_path_buf(),
+                reason: "local authority is not a directory".to_string(),
+            });
+        }
+        Ok(PathAuthority::LocalRoot {
+            path: path.to_path_buf(),
+            identity: file_identity(&metadata),
+        })
     }
 
     pub fn docker_prune(size: u64) -> Self {
@@ -183,4 +216,8 @@ impl CleanupItem {
     pub fn allocations(&self) -> &[Allocation] {
         &self.allocations
     }
+}
+
+fn file_identity(metadata: &fs::Metadata) -> FileIdentity {
+    FileIdentity { device: metadata.dev(), inode: metadata.ino() }
 }
