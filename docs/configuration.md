@@ -18,7 +18,7 @@
 
 The CLI currently uses command-line flags as the primary runtime configuration surface.
 
-- Category selection: `--type`, `--all`
+- Target selection: `--type`, `--all`
 - Scope selection: `--current` or explicit path arguments
 - Deletion confirmation control: `-y/--yes`
 - Verbose reporting: `-v/--verbose`

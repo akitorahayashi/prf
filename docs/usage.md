@@ -19,10 +19,10 @@ prf run --all -y ~/Desktop           # Delete all categories without prompts
 prf rn --current --type rust -y      # Alias; current-directory scoped cleanup
 ```
 
-Category behavior:
+Target behavior:
 
-- Default categories: xcode, python, rust, nodejs, brew, docker
-- Current-directory mode (`--current`) excludes brew and docker categories
+- Default targets: xcode, python, rust, nodejs, brew, docker
+- Current-directory mode (`--current`) excludes brew and docker targets
 - Docker cleanup runs only when docker is requested and `--current` is not used
 
 Help displays via:

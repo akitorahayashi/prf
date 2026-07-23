@@ -34,9 +34,9 @@ prf rn --current --type rust -y # Alias for run with explicit deletion
 prf scan --type python -v       # Show detailed Python cleanup targets
 ```
 
-### Categories
+### Targets
 
-| Category  | Description |
+| Target    | Description |
 |-----------|-------------|
 | `xcode`   | Project-local Xcode/Swift caches and, outside `--current`, vetted global Xcode and SwiftPM caches. |
 | `python`  | Python caches such as `__pycache__`, `.pytest_cache`, `.ruff_cache`, `.mypy_cache`, and `.venv`. |
@@ -57,7 +57,8 @@ The implementation follows explicit boundaries:
 
 - `src/cli/` parses CLI arguments and converts them into app options.
 - `src/app/` orchestrates scan and run use cases.
-- `src/targets/` owns cleanup target discovery and Docker cleanup behavior.
+- `src/cleanup/` owns discovery contracts, cleanup candidates, action application, and reports.
+- `src/targets/` declares supported targets and owns target-specific inspection.
 - `src/fs/` owns root resolution, size measurement, and filesystem deletion.
 - `src/output/` owns terminal rendering, progress styles, and prompts.
 

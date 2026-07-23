@@ -62,6 +62,72 @@ exit 0
 }
 
 #[test]
+fn run_does_not_prune_docker_without_a_scanned_candidate() {
+    let ctx = TestContext::new();
+    let marker = ctx.work_dir().join("docker_prune_marker");
+    ctx.set_env("PRF_TEST_MARKER", &marker);
+    ctx.create_mock_command(
+        "docker",
+        r#"#!/bin/sh
+if [ "$1" = "info" ]; then
+  exit 0
+fi
+if [ "$1" = "system" ] && [ "$2" = "df" ]; then
+  echo '{"Type":"Images","Reclaimable":"0B"}'
+  exit 0
+fi
+if [ "$1" = "system" ] && [ "$2" = "prune" ]; then
+  echo "$@" > "$PRF_TEST_MARKER"
+  exit 0
+fi
+exit 0
+"#,
+    );
+
+    ctx.cli()
+        .arg("run")
+        .arg("--type")
+        .arg("docker")
+        .arg("-y")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Nothing to delete"));
+
+    assert!(!marker.exists(), "an action absent from the scan report must not run");
+}
+
+#[test]
+fn run_reports_docker_process_failure() {
+    let ctx = TestContext::new();
+    ctx.create_mock_command(
+        "docker",
+        r#"#!/bin/sh
+if [ "$1" = "info" ]; then
+  exit 0
+fi
+if [ "$1" = "system" ] && [ "$2" = "df" ]; then
+  echo '{"Type":"Images","Reclaimable":"1GB"}'
+  exit 0
+fi
+if [ "$1" = "system" ] && [ "$2" = "prune" ]; then
+  exit 7
+fi
+exit 0
+"#,
+    );
+
+    ctx.cli()
+        .arg("run")
+        .arg("--type")
+        .arg("docker")
+        .arg("-y")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Cleanup failed"))
+        .stderr(predicate::str::contains("status"));
+}
+
+#[test]
 fn run_interactive_accepts_selection() {
     let ctx = TestContext::new();
     let cache = ctx.write_home_file("workspace/__pycache__/foo.pyc", "cache");
