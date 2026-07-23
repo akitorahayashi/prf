@@ -19,20 +19,25 @@ src/
   error.rs         Application error taxonomy
   cli/             Clap commands, target selection, root resolution, and app option conversion
   app/
-    scan.rs        Parallel inspection, size measurement, and scan/list rendering
+    scan.rs        Parallel inspection, footprint measurement, and scan/list rendering
     run.rs         Scan, interactive selection, confirmation, and action application
   cleanup/
     target.rs      Target identity, scope support, and discovery contract
     scope.rs       Scan roots and current-mode state
     discovery.rs   Standard discovery rules, inspections, diagnostics, and listings
-    candidate.rs   Concrete actions and size estimation
+    candidate.rs   Concrete actions and their footprint measurement basis
     action.rs      Filesystem and process action vocabulary
+    plan.rs        Canonical removal roots shared by estimation and application
     report.rs      Target-grouped scan reports and selected subsets
-    apply.rs       Candidate normalization and action execution
+    apply.rs       Removal-plan execution and successful-action summaries
+  footprint/
+    amount.rs      Estimated byte amounts and allocated/reported bases
+    allocation.rs  Parallel allocation measurement and selection-aware aggregation
+    error.rs       Footprint-specific failure taxonomy
   targets/
     registry.rs    Authoritative ordered target catalog and CLI resolution
     *.rs           One definition per target; Docker owns its CLI protocol and parser
-  fs/              Root resolution, size measurement, and filesystem removal
+  fs/              Root resolution and filesystem removal
   output/          Byte/path display, reports, messages, progress styles, and prompts
 tests/
   cli.rs           CLI integration-test entry point with cases under tests/cli/
@@ -43,13 +48,14 @@ docs/              Architecture, usage, configuration, and testing references
 ```
 
 Target-specific protocols and parsers remain private to their target module. Shared discovery
-behavior belongs in `cleanup/discovery.rs`; filesystem mutation belongs in `fs/`; terminal-facing
-formatting and interaction belong in `output/`.
+behavior belongs in `cleanup/discovery.rs`; footprint semantics belong in `footprint/`; filesystem
+mutation belongs in `fs/`; terminal-facing formatting and interaction belong in `output/`.
 
 ## Testing
 
 Unit tests are colocated under `#[cfg(test)]` in their owning source modules. They cover pure
-selection and parsing logic as well as filesystem boundaries through temporary directories.
+selection and parsing logic, footprint contracts, and filesystem boundaries through temporary
+directories.
 Integration tests execute the compiled binary from `tests/`. `TestContext` creates state under
 `target/test_tmp`, assigns a temporary `HOME`, and pins `PATH` to a mock-command directory so a host
 Docker installation cannot enter a test accidentally. Tests that mutate process-global state use
@@ -60,7 +66,7 @@ The local task surface is:
 - `just fix` - applies Rust and justfile formatting.
 - `just check` - verifies formatting, Clippy with warnings denied, and justfile formatting.
 - `just test` - runs all targets and features.
-- `just coverage` - runs cargo-tarpaulin with an 80 percent threshold.
+- `just coverage` - runs cargo-tarpaulin for `prf` sources with an 80 percent threshold.
 - `just build` / `just build-release` - builds debug or release binaries.
 
 ## Core Concepts
@@ -69,12 +75,13 @@ The local task surface is:
 
 `cli` resolves targets and roots, then `app::scan::scan_targets()` inspects selected targets in
 parallel. Each `Inspection` can contain candidates, list-only information, and non-fatal
-diagnostics. Candidate sizes are measured before they enter a `ScanReport`.
+diagnostics. A `RemovalCatalog` canonicalizes candidate paths, and one footprint index measures its
+maximal physical roots before candidates enter a `ScanReport`.
 
 `run` always uses this same scan flow. Interactive target selection produces a subset of the report,
-confirmation approves that subset, and `apply_candidates()` receives candidates copied from it.
-No additional action is synthesized after scanning; path actions are normalized during application
-as described below.
+confirmation approves that subset, and `apply_plan()` receives the subset's canonical
+`RemovalPlan`. No additional action is synthesized after scanning; estimation and application use
+the same normalized roots.
 
 ### Scope Semantics
 
@@ -103,19 +110,32 @@ and stops descending once a matching removable directory is found. A target uses
 `Action` is the complete application vocabulary:
 
 - `RemovePath` carries a path and its expected file or directory kind.
-- `RunProcess` carries a static executable, separated argument vector, label, and scanned size
-  estimate.
+- `RunProcess` carries a static executable, separated argument vector, and label.
 
-Before filesystem application, existing paths are canonicalized, duplicate paths are merged, and
-descendants of another selected removal are omitted. Canonicalization means a candidate that is a
-symbolic link resolves to its target before removal; the physical path can therefore differ from
-the path rendered during scanning. Within a traversed directory, files and symbolic links are
-removed before directories, deepest directories are attempted first, vanished paths are
-idempotent, and directories that become non-empty remain in place and are reported as failed.
+A `RemovalCatalog` canonicalizes existing paths and merges aliases after discovery. A selected
+`RemovalPlan` omits descendants of another selected root while retaining candidate and target
+ownership. Canonicalization means a candidate that is a symbolic link resolves to its target before
+measurement and removal; the physical path can therefore differ from the path rendered during
+scanning. Within a traversed directory, files and symbolic links are removed before directories,
+deepest directories are attempted first, vanished paths are idempotent, and directories that become
+non-empty remain in place and are reported as failed.
 
 Path removals run in parallel before process actions. Application is not transactional: an error
 can be returned after other selected paths have already been removed, and no rollback occurs.
 Process actions run without a shell and surface startup or non-zero-exit failures.
+
+### Footprint Model
+
+Filesystem estimates use Unix allocated blocks rather than logical file length. Measurement includes
+regular files, directory entries, and non-followed symbolic links. Regular files with multiple hard
+links contribute once only when every reported link belongs to the selected removal roots.
+
+The allocation walker shares one bounded Rayon pool across maximal candidate roots and nested
+directories. It retains per-root totals and multi-link inode observations rather than a display tree.
+An `Index` derives candidate contributions and aggregate estimates for arbitrary report subsets.
+Externally reported process estimates have a distinct `Basis` and remain outside path and inode
+normalization. Missing paths contribute zero; other metadata and traversal failures are explicit.
+APFS clones, snapshots, and concurrent filesystem changes keep all displayed values estimates.
 
 ### Docker Inspection
 
@@ -138,8 +158,13 @@ confirmation remains required unless `-y/--yes` is supplied.
 - `Target` - registered metadata plus scope support and a `Discovery` contract.
 - `Scope` - resolved recursive roots and the current-mode flag.
 - `Inspection` - candidates, list results, and diagnostics from one target.
-- `Candidate` - a target-attributed `Action` with explicit or measured estimated size.
-- `ScanReport` - candidates grouped by `TargetId`, and the authority for run subsets.
+- `Candidate` - a target-attributed `Action` with an allocated or reported footprint basis.
+- `RemovalCatalog` - canonical physical roots and candidate-to-root ownership.
+- `RemovalPlan` - a selected, non-overlapping subset shared by estimation and application.
+- `Estimate` - a checked byte amount produced from allocated or externally reported data.
+- `Index` - selection-aware allocation totals and multi-link inode observations.
+- `ScanReport` - candidates and footprint data grouped by `TargetId`, and the authority for run
+  subsets.
 - `ApplySummary` - applied count, failed count, and estimated reclaimed bytes.
 - `AppError` - the typed CLI-wide error model used across discovery, cleanup, I/O, and selection.
 
@@ -150,7 +175,7 @@ confirmation remains required unless `-y/--yes` is supplied.
 - Destructive execution requires confirmation unless `-y/--yes` is present.
 - Current mode cannot select default-only targets or evaluate global home-relative rules.
 - Missing roots and unavailable optional tools are visible diagnostics; failed commands, malformed
-  structured output, and unexpected filesystem errors are explicit failures.
+  structured output, footprint overflow, and unexpected filesystem errors are explicit failures.
 - A path that disappears between discovery, measurement, and application is treated idempotently.
 
 ## Documentation Responsibilities

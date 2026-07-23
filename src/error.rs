@@ -26,6 +26,9 @@ pub enum AppError {
     #[error("Cleanup failed: {0}")]
     Cleanup(String),
 
+    #[error("Footprint estimation failed: {0}")]
+    Footprint(#[from] crate::footprint::Error),
+
     #[error(
         "Cannot determine the default scan root because HOME is not set. Pass a path argument or use --current."
     )]

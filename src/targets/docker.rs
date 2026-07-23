@@ -100,7 +100,9 @@ fn parse_reclaimable_total(stdout: &str) -> Result<u64, AppError> {
                 index + 1
             ))
         })?;
-        total = total.saturating_add(parse_reclaimable_size(token)?.as_u64());
+        total = total
+            .checked_add(parse_reclaimable_size(token)?.as_u64())
+            .ok_or_else(|| AppError::Discovery("Docker reclaimable total overflow".to_string()))?;
     }
     Ok(total)
 }
@@ -149,6 +151,17 @@ mod tests {
         assert!(matches!(
             parse_reclaimable_total("{\"Type\":\"Images\"}"),
             Err(AppError::Discovery(_))
+        ));
+    }
+
+    #[test]
+    fn reclaimable_total_overflow_is_an_explicit_failure() {
+        assert!(matches!(
+            parse_reclaimable_total(
+                "{\"Reclaimable\":\"18446744073709551615B\"}\n\
+                 {\"Reclaimable\":\"1B\"}"
+            ),
+            Err(AppError::Discovery(message)) if message.contains("overflow")
         ));
     }
 }

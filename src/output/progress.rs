@@ -4,7 +4,7 @@ pub fn discovery_spinner_style() -> ProgressStyle {
     ProgressStyle::with_template("{spinner:.cyan} {msg}").unwrap().tick_chars("|/-\\")
 }
 
-pub fn size_progress_style() -> ProgressStyle {
+pub fn footprint_progress_style() -> ProgressStyle {
     shared_progress_style()
 }
 

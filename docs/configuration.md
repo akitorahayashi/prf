@@ -27,6 +27,7 @@ The CLI currently uses command-line flags as the primary runtime configuration s
 
 - `.github/workflows/ci-workflows.yml` orchestrates reusable workflows for static checks, tests, coverage, and build.
 - Static checks, tests, and coverage execute via `mise exec -- just <recipe>`.
+- Coverage applies to `prf` sources and excludes reference-only clones under `references/`.
 - `release.yml` delegates tagged release builds to `build.yml` using a `release_id` handoff.
 
 ## Release

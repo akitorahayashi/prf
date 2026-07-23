@@ -5,10 +5,11 @@ use std::time::Duration;
 use indicatif::{MultiProgress, ProgressBar};
 use rayon::prelude::*;
 
-use crate::cleanup::{Inspection, ScanReport, Scope, Target, measure_candidates};
+use crate::cleanup::{Inspection, RemovalCatalog, ScanReport, Scope, Target};
 use crate::error::AppError;
+use crate::footprint::Index;
 use crate::output::messages;
-use crate::output::progress::{discovery_spinner_style, size_progress_style};
+use crate::output::progress::{discovery_spinner_style, footprint_progress_style};
 use crate::output::report::{print_diagnostics, print_list_results, print_scan_report};
 
 pub struct ScanOptions {
@@ -43,7 +44,7 @@ pub fn scan_targets(
     progress: &Arc<MultiProgress>,
 ) -> Result<ScanReport, AppError> {
     if targets.is_empty() {
-        return Ok(ScanReport::new());
+        return Ok(ScanReport::empty());
     }
 
     let discovery_style = Arc::new(discovery_spinner_style());
@@ -68,22 +69,20 @@ pub fn scan_targets(
     let inspections = inspections?;
 
     print_diagnostics(&inspections);
-    let mut candidates =
+    let candidates =
         inspections.into_iter().flat_map(|inspection| inspection.candidates).collect::<Vec<_>>();
     if candidates.is_empty() {
-        return Ok(ScanReport::new());
+        return Ok(ScanReport::empty());
     }
 
     let total_items = candidates.len();
     let size_bar = progress.add(ProgressBar::new(total_items as u64));
-    size_bar.set_style(size_progress_style());
-    measure_candidates(&mut candidates, || size_bar.inc(1))?;
+    size_bar.set_style(footprint_progress_style());
+    let catalog = RemovalCatalog::new(&candidates)?;
+    let footprint = Index::measure(&catalog.measurement_roots())?;
+    size_bar.inc(total_items as u64);
     size_bar.finish_and_clear();
-    let _ = progress.println(messages::size_calculation_complete(total_items));
+    let _ = progress.println(messages::footprint_calculation_complete(total_items));
 
-    let mut report = ScanReport::new();
-    for candidate in candidates {
-        report.add_candidate(candidate);
-    }
-    Ok(report)
+    ScanReport::build(candidates, catalog, footprint, targets)
 }

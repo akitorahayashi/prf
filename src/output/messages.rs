@@ -14,9 +14,9 @@ pub fn discovery_complete(display_name: &str, count: usize) -> String {
     )
 }
 
-pub fn size_calculation_complete(count: usize) -> String {
+pub fn footprint_calculation_complete(count: usize) -> String {
     format!(
-        "{count}/{count} Size calculation complete ({} item{})",
+        "{count}/{count} Footprint calculation complete ({} item{})",
         count,
         if count == 1 { "" } else { "s" }
     )
