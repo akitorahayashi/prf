@@ -45,6 +45,15 @@ pub enum AppError {
     #[error("External command failed: {0}")]
     ExternalCommand(String),
 
+    #[error("Candidate revalidation failed for '{}': {reason}", path.display())]
+    Revalidation { path: PathBuf, reason: String },
+
+    #[error("Cannot remove '{}': {reason}", path.display())]
+    Removal { path: PathBuf, reason: String },
+
+    #[error("Cleanup completed with failures: {0}")]
+    CleanupFailed(String),
+
     #[error("Operation cancelled by user")]
     Cancelled,
 }

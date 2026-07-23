@@ -10,10 +10,16 @@ use crate::targets::item::{Allocation, FileIdentity};
 
 const BLOCK_SIZE: u64 = 512;
 
-pub fn path_allocations(path: &Path) -> Result<Vec<Allocation>, AppError> {
+pub struct MeasuredPath {
+    pub identity: FileIdentity,
+    pub allocations: Vec<Allocation>,
+}
+
+pub fn path_allocations(path: &Path) -> Result<MeasuredPath, AppError> {
     let metadata = fs::symlink_metadata(path).map_err(|error| measurement_error(path, error))?;
+    let identity = file_identity(&metadata);
     if !metadata.is_dir() {
-        return Ok(vec![allocation(&metadata)]);
+        return Ok(MeasuredPath { identity, allocations: vec![allocation(&metadata)] });
     }
 
     let mut seen = BTreeSet::new();
@@ -33,7 +39,7 @@ pub fn path_allocations(path: &Path) -> Result<Vec<Allocation>, AppError> {
     }
 
     allocations.sort_by_key(|allocation| allocation.identity);
-    Ok(allocations)
+    Ok(MeasuredPath { identity, allocations })
 }
 
 fn allocation(metadata: &fs::Metadata) -> Allocation {
@@ -41,6 +47,10 @@ fn allocation(metadata: &fs::Metadata) -> Allocation {
         identity: FileIdentity { device: metadata.dev(), inode: metadata.ino() },
         bytes: metadata.blocks().saturating_mul(BLOCK_SIZE),
     }
+}
+
+fn file_identity(metadata: &fs::Metadata) -> FileIdentity {
+    FileIdentity { device: metadata.dev(), inode: metadata.ino() }
 }
 
 fn measurement_error(path: &Path, error: std::io::Error) -> AppError {
@@ -62,14 +72,18 @@ mod tests {
         let second = temp.child("second.bin");
         std::fs::hard_link(first.path(), second.path()).expect("hard link exists");
 
-        let allocations = path_allocations(temp.path()).expect("directory is measured");
+        let measured = path_allocations(temp.path()).expect("directory is measured");
         let file_identity = FileIdentity {
             device: first.metadata().expect("metadata exists").dev(),
             inode: first.metadata().expect("metadata exists").ino(),
         };
 
         assert_eq!(
-            allocations.iter().filter(|allocation| allocation.identity == file_identity).count(),
+            measured
+                .allocations
+                .iter()
+                .filter(|allocation| allocation.identity == file_identity)
+                .count(),
             1
         );
     }
@@ -84,12 +98,14 @@ mod tests {
         outside.child("large.bin").write_binary(&vec![1; 32 * 1024]).expect("outside file exists");
         symlink(outside.path(), temp.child("linked").path()).expect("symlink exists");
 
-        let allocations = path_allocations(temp.path()).expect("directory is measured");
+        let measured = path_allocations(temp.path()).expect("directory is measured");
         let outside_identity = FileIdentity {
             device: outside.child("large.bin").metadata().expect("metadata exists").dev(),
             inode: outside.child("large.bin").metadata().expect("metadata exists").ino(),
         };
 
-        assert!(!allocations.iter().any(|allocation| allocation.identity == outside_identity));
+        assert!(
+            !measured.allocations.iter().any(|allocation| allocation.identity == outside_identity)
+        );
     }
 }

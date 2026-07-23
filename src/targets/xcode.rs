@@ -74,7 +74,8 @@ impl XcodeTarget {
         for path in Self::global_safe_paths() {
             match fs::symlink_metadata(&path) {
                 Ok(_) => {
-                    self.add_path(&path, PathAuthority::UserPath(path.clone()), &mut items)?;
+                    let authority = CleanupItem::user_authority(&path)?;
+                    self.add_path(&path, authority, &mut items)?;
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => {

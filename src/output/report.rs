@@ -36,7 +36,7 @@ pub fn print_scan_report(report: &ScanReport, categories: &[Category], verbose: 
                 );
                 if verbose {
                     for item in items {
-                        println!("    - {}", item_label(&item.action));
+                        println!("    - {}", action_label(&item.action));
                     }
                 }
             }
@@ -100,16 +100,33 @@ pub fn print_deletion_plan(report: &ScanReport, categories: &[Category], verbose
     }
 
     for item in report.items_for_categories(categories) {
+        let category_names =
+            item.categories().map(|category| category.as_str()).collect::<Vec<_>>().join(",");
         if verbose {
-            println!("    - {:<60} {}", item_label(&item.action), format_bytes(item.size));
+            println!(
+                "    - [{category_names}] {:<48} {}",
+                action_label(&item.action),
+                format_bytes(item.size)
+            );
         } else {
-            println!("    - {}", item_label(&item.action));
+            println!("    - [{category_names}] {}", action_label(&item.action));
         }
     }
     println!("Total to delete: {}", format_bytes(report.total_size()));
 }
 
-fn item_label(action: &CleanupAction) -> String {
+pub fn print_cleanup_summary(removed: usize, skipped: usize, failed: usize, filesystem_bytes: u64) {
+    println!(
+        "Cleanup summary: {removed} removed, {skipped} skipped, {failed} failed; {} estimated filesystem bytes removed.",
+        format_bytes(filesystem_bytes)
+    );
+}
+
+pub fn print_cleanup_failure(action: &CleanupAction, reason: &str) {
+    eprintln!("Failed: {}: {reason}", action_label(action));
+}
+
+pub fn action_label(action: &CleanupAction) -> String {
     match action {
         CleanupAction::Filesystem(candidate) => display_path(&candidate.path),
         CleanupAction::External(action) => action.description().to_string(),

@@ -48,11 +48,11 @@ impl ScanReport {
     }
 
     pub fn total_size(&self) -> u64 {
-        allocation_total(&self.items_for_categories(&self.categories()))
+        candidate_total_size(&self.items_for_categories(&self.categories()))
     }
 
     pub fn category_total_size(&self, category: Category) -> u64 {
-        allocation_total(&self.items_for_categories(&[category]))
+        candidate_total_size(&self.items_for_categories(&[category]))
     }
 
     pub fn category_item_count(&self, category: Category) -> usize {
@@ -148,7 +148,7 @@ fn contains_candidate(existing: &CleanupItem, candidate: &CleanupItem) -> bool {
     }
 }
 
-fn allocation_total(items: &[CleanupItem]) -> u64 {
+pub fn candidate_total_size(items: &[CleanupItem]) -> u64 {
     let mut seen = BTreeSet::new();
     let mut total = 0u64;
 

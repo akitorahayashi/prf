@@ -15,7 +15,7 @@ fn run_type_nodejs_yes_deletes_directories() {
         .arg(ctx.home())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Attempted to delete"));
+        .stdout(predicate::str::contains("Cleanup summary: 1 removed, 0 skipped, 0 failed"));
 
     assert!(!cache_dir.exists(), "cache directory should be deleted");
 }
@@ -33,7 +33,151 @@ fn run_interactive_accepts_selection() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Deletion plan"))
-        .stdout(predicate::str::contains("Attempted to delete"));
+        .stdout(predicate::str::contains("Cleanup summary: 1 removed, 0 skipped, 0 failed"));
 
     assert!(!cache_dir.exists(), "cache directory should be deleted");
+}
+
+#[test]
+fn explicit_docker_request_fails_when_docker_is_unavailable() {
+    let ctx = TestContext::new();
+    let marker = ctx.work_dir().join("pruned");
+    ctx.create_mock_command(
+        "docker",
+        &format!(
+            r#"#!/bin/sh
+if [ "$1" = "info" ]; then
+  exit 1
+fi
+if [ "$2" = "prune" ]; then
+  touch "{}"
+fi
+"#,
+            marker.display()
+        ),
+    );
+
+    ctx.cli()
+        .arg("run")
+        .arg("--type")
+        .arg("docker")
+        .arg("-y")
+        .arg(ctx.home())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Docker is unavailable"));
+
+    assert!(!marker.exists(), "Docker prune must not run when Docker is unavailable");
+}
+
+#[test]
+fn failed_docker_scan_never_runs_prune() {
+    let ctx = TestContext::new();
+    let marker = ctx.work_dir().join("pruned");
+    ctx.create_mock_command(
+        "docker",
+        &format!(
+            r#"#!/bin/sh
+if [ "$1" = "info" ]; then
+  exit 0
+fi
+if [ "$2" = "df" ]; then
+  echo 'not-json'
+  exit 0
+fi
+if [ "$2" = "prune" ]; then
+  touch "{}"
+  exit 0
+fi
+"#,
+            marker.display()
+        ),
+    );
+
+    ctx.cli()
+        .arg("run")
+        .arg("--type")
+        .arg("docker")
+        .arg("-y")
+        .arg(ctx.home())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Scan is incomplete"));
+
+    assert!(!marker.exists(), "Docker prune must not run after a failed scan");
+}
+
+#[test]
+fn zero_reclaimable_docker_bytes_never_runs_prune() {
+    let ctx = TestContext::new();
+    let marker = ctx.work_dir().join("pruned");
+    ctx.create_mock_command(
+        "docker",
+        &format!(
+            r#"#!/bin/sh
+if [ "$1" = "info" ]; then
+  exit 0
+fi
+if [ "$2" = "df" ]; then
+  echo '{{"Reclaimable":"0B (0%)"}}'
+  exit 0
+fi
+if [ "$2" = "prune" ]; then
+  touch "{}"
+  exit 0
+fi
+"#,
+            marker.display()
+        ),
+    );
+
+    ctx.cli()
+        .arg("run")
+        .arg("--type")
+        .arg("docker")
+        .arg("-y")
+        .arg(ctx.home())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Nothing to delete"));
+
+    assert!(!marker.exists(), "Docker prune must not run for a clean scan");
+}
+
+#[test]
+fn confirmed_docker_plan_runs_prune_once() {
+    let ctx = TestContext::new();
+    let marker = ctx.work_dir().join("pruned");
+    ctx.create_mock_command(
+        "docker",
+        &format!(
+            r#"#!/bin/sh
+if [ "$1" = "info" ]; then
+  exit 0
+fi
+if [ "$2" = "df" ]; then
+  echo '{{"Reclaimable":"1GB (100%)"}}'
+  exit 0
+fi
+if [ "$2" = "prune" ]; then
+  echo prune >> "{}"
+  exit 0
+fi
+"#,
+            marker.display()
+        ),
+    );
+
+    ctx.cli()
+        .arg("run")
+        .arg("--type")
+        .arg("docker")
+        .arg("-y")
+        .arg(ctx.home())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Cleanup summary: 1 removed, 0 skipped, 0 failed"));
+
+    let invocations = std::fs::read_to_string(marker).expect("prune marker exists");
+    assert_eq!(invocations.lines().count(), 1, "Docker prune runs exactly once");
 }

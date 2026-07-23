@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
@@ -16,7 +17,7 @@ pub enum ItemKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PathAuthority {
     LocalRoot(PathBuf),
-    UserPath(PathBuf),
+    UserPath { allowed: PathBuf, canonical_parent: PathBuf },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +25,7 @@ pub struct FilesystemCandidate {
     pub path: PathBuf,
     pub kind: ItemKind,
     pub authority: PathAuthority,
+    pub identity: Option<FileIdentity>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -74,7 +76,12 @@ impl CleanupItem {
     ) -> Self {
         Self {
             categories: BTreeSet::from([category]),
-            action: CleanupAction::Filesystem(FilesystemCandidate { path, kind, authority }),
+            action: CleanupAction::Filesystem(FilesystemCandidate {
+                path,
+                kind,
+                authority,
+                identity: None,
+            }),
             size: 0,
             allocations: Vec::new(),
         }
@@ -100,7 +107,21 @@ impl CleanupItem {
         } else {
             ItemKind::File
         };
-        Ok(Self::filesystem(category, path, kind, authority))
+        let mut item = Self::filesystem(category, path, kind, authority);
+        item.set_identity(FileIdentity { device: metadata.dev(), inode: metadata.ino() });
+        Ok(item)
+    }
+
+    pub fn user_authority(path: &Path) -> Result<PathAuthority, AppError> {
+        let parent = path.parent().ok_or_else(|| AppError::Traversal {
+            path: path.to_path_buf(),
+            reason: "allowlisted path has no parent".to_string(),
+        })?;
+        let canonical_parent = fs::canonicalize(parent).map_err(|error| AppError::Traversal {
+            path: parent.to_path_buf(),
+            reason: error.to_string(),
+        })?;
+        Ok(PathAuthority::UserPath { allowed: path.to_path_buf(), canonical_parent })
     }
 
     pub fn docker_prune(size: u64) -> Self {
@@ -151,6 +172,12 @@ impl CleanupItem {
             .iter()
             .fold(0u64, |total, allocation| total.saturating_add(allocation.bytes));
         self.allocations = allocations;
+    }
+
+    pub fn set_identity(&mut self, identity: FileIdentity) {
+        if let CleanupAction::Filesystem(candidate) = &mut self.action {
+            candidate.identity = Some(identity);
+        }
     }
 
     pub fn allocations(&self) -> &[Allocation] {

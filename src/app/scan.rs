@@ -145,7 +145,10 @@ fn measure_candidates(report: &mut ScanReport, progress: &Arc<MultiProgress>) {
         };
 
         match path_allocations(&candidate.path) {
-            Ok(allocations) => item.set_allocations(allocations),
+            Ok(measured) => {
+                item.set_identity(measured.identity);
+                item.set_allocations(measured.allocations);
+            }
             Err(error) => {
                 for category in item.categories() {
                     failures.insert(category, error.to_string());

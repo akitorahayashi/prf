@@ -41,11 +41,8 @@ impl CleanupTarget for BrewTarget {
         for path in Self::brew_paths() {
             match fs::symlink_metadata(&path) {
                 Ok(_) => {
-                    items.push(CleanupItem::from_path(
-                        Category::Brew,
-                        path.clone(),
-                        PathAuthority::UserPath(path),
-                    )?);
+                    let authority = CleanupItem::user_authority(&path)?;
+                    items.push(CleanupItem::from_path(Category::Brew, path.clone(), authority)?);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => {
