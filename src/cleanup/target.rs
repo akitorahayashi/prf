@@ -66,6 +66,9 @@ impl Target {
     }
 
     pub fn inspect(&self, scope: &Scope) -> Result<Inspection, AppError> {
+        if scope.current() && !self.scope_support.supports_current() {
+            return Err(AppError::UnsupportedCurrentModeTarget(self.id.to_string()));
+        }
         self.discovery.inspect(self.id, scope)
     }
 }
@@ -73,5 +76,30 @@ impl Target {
 impl fmt::Display for Target {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.id.fmt(formatter)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unexpected_inspection(_: TargetId, _: &Scope) -> Result<Inspection, AppError> {
+        panic!("unsupported target inspection must not run")
+    }
+
+    #[test]
+    fn current_scope_rejects_default_only_target_before_inspection() {
+        let target = Target::new(
+            TargetId::new("global"),
+            "Global",
+            ScopeSupport::DefaultOnly,
+            Discovery::Inspector(unexpected_inspection),
+        );
+        let scope = Scope::new(Vec::new(), true);
+
+        assert!(matches!(
+            target.inspect(&scope),
+            Err(AppError::UnsupportedCurrentModeTarget(name)) if name == "global"
+        ));
     }
 }

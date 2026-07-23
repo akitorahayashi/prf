@@ -57,9 +57,13 @@ pub fn execute(options: RunOptions) -> Result<(), AppError> {
     }
 
     let candidates = subset.candidates_for(&selected_targets);
-    let deletion_bar = progress.add(ProgressBar::new(candidates.len() as u64));
+    let deletion_bar = progress.add(ProgressBar::new(0));
     deletion_bar.set_style(deletion_progress_style());
-    let result = apply_candidates(&candidates, || deletion_bar.inc(1));
+    let result = apply_candidates(
+        &candidates,
+        |count| deletion_bar.set_length(count as u64),
+        || deletion_bar.inc(1),
+    );
     deletion_bar.finish_and_clear();
     let summary = result?;
 

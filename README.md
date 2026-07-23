@@ -27,9 +27,9 @@ prf scan --list
 ### Common Commands
 
 ```bash
-prf scan --all                  # Scan every category
+prf scan --all                  # Scan every target
 prf sc --current                # Alias for scan in current-directory mode
-prf run                         # Scan, select categories, and confirm deletion
+prf run                         # Scan, select targets, and confirm deletion
 prf rn --current --type rust -y # Alias for run with explicit deletion
 prf scan --type python -v       # Show detailed Python cleanup targets
 ```
@@ -47,8 +47,8 @@ prf scan --type python -v       # Show detailed Python cleanup targets
 
 ### Safety Model
 
-1. Scans report reclaimable size per category.
-2. `--type <category>`, `--all`, and interactive selection constrain deletion scope.
+1. Scans report reclaimable size per target.
+2. `--type <target>`, `--all`, and interactive selection constrain deletion scope.
 3. Destructive actions require confirmation unless `-y/--yes` is supplied.
 
 ## Architecture

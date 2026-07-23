@@ -36,5 +36,5 @@ cargo test --test safety
 Run a specific module test:
 
 ```bash
-cargo test app::scan::tests
+cargo test cleanup::discovery::tests
 ```

@@ -11,75 +11,156 @@ use crate::fs::remove::{remove_file, safe_remove_dir_all};
 use super::action::{Action, EntryKind};
 use super::candidate::Candidate;
 
+#[derive(Clone)]
 struct PathRemoval {
     path: PathBuf,
     kind: EntryKind,
     size: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ApplySummary {
     pub applied: usize,
     pub failed: usize,
     pub freed_estimate: u64,
 }
 
+impl ApplySummary {
+    fn merge(self, other: Self) -> Self {
+        Self {
+            applied: self.applied + other.applied,
+            failed: self.failed + other.failed,
+            freed_estimate: self.freed_estimate.saturating_add(other.freed_estimate),
+        }
+    }
+}
+
 fn is_strict_descendant(child: &Path, ancestor: &Path) -> bool {
     child != ancestor && child.starts_with(ancestor)
 }
 
-pub fn apply_candidates<F>(
+pub fn apply_candidates<P, F>(
     candidates: &[Candidate],
-    on_applied: F,
+    on_planned: P,
+    on_completed: F,
 ) -> Result<ApplySummary, AppError>
+where
+    P: FnOnce(usize),
+    F: Fn() + Sync,
+{
+    let path_plan = prepare_root_paths(candidates);
+    let process_count = candidates
+        .iter()
+        .filter(|candidate| matches!(&candidate.action, Action::RunProcess { .. }))
+        .count();
+    let action_count =
+        path_plan.as_ref().map_or(process_count, |paths| paths.len() + process_count);
+    on_planned(action_count);
+
+    let path_result = path_plan.and_then(|paths| apply_paths(&paths, &on_completed));
+    let process_result = apply_processes(candidates, &on_completed);
+    combine_results(path_result, process_result)
+}
+
+fn apply_paths<F>(paths: &[PathRemoval], on_completed: &F) -> Result<ApplySummary, AppError>
 where
     F: Fn() + Sync,
 {
-    let paths = prepare_paths(candidates)?;
-    let roots: Vec<&PathRemoval> = paths
-        .iter()
-        .filter(|candidate| {
-            !paths.iter().any(|other| is_strict_descendant(&candidate.path, &other.path))
-        })
-        .collect();
-
-    let outcomes: Result<Vec<(bool, u64)>, AppError> = roots
+    let outcomes: Vec<Result<(bool, u64), AppError>> = paths
         .par_iter()
         .map(|removal| {
-            match removal.kind {
-                EntryKind::File => remove_file(&removal.path)?,
-                EntryKind::Directory => safe_remove_dir_all(&removal.path)?,
-            }
-            let removed = !removal.path.exists();
-            on_applied();
-            Ok((removed, removal.size))
+            let result = match removal.kind {
+                EntryKind::File => remove_file(&removal.path),
+                EntryKind::Directory => safe_remove_dir_all(&removal.path),
+            };
+            on_completed();
+            result?;
+            Ok((!removal.path.exists(), removal.size))
         })
         .collect();
-    let outcomes = outcomes?;
 
-    let mut applied = outcomes.iter().filter(|(removed, _)| *removed).count();
-    let failed = outcomes.len() - applied;
-    let mut freed_estimate: u64 =
-        outcomes.iter().filter(|(removed, _)| *removed).map(|(_, size)| size).sum();
+    let mut summary = ApplySummary::default();
+    let mut errors = Vec::new();
+    for outcome in outcomes {
+        match outcome {
+            Ok((true, size)) => {
+                summary.applied += 1;
+                summary.freed_estimate = summary.freed_estimate.saturating_add(size);
+            }
+            Ok((false, _)) => summary.failed += 1,
+            Err(error) => errors.push(error),
+        }
+    }
+
+    if errors.is_empty() { Ok(summary) } else { Err(group_error("path actions", errors)) }
+}
+
+fn apply_processes<F>(candidates: &[Candidate], on_completed: &F) -> Result<ApplySummary, AppError>
+where
+    F: Fn() + Sync,
+{
+    let mut summary = ApplySummary::default();
+    let mut errors = Vec::new();
 
     for candidate in candidates {
         let Action::RunProcess { label, program, args } = &candidate.action else {
             continue;
         };
 
-        let status = Command::new(program)
+        let result = Command::new(program)
             .args(args.iter().copied())
             .status()
-            .map_err(|error| AppError::Cleanup(format!("{label} could not start: {error}")))?;
-        if !status.success() {
-            return Err(AppError::Cleanup(format!("{label} failed with status {status}")));
+            .map_err(|error| AppError::Cleanup(format!("{label} could not start: {error}")))
+            .and_then(|status| {
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(AppError::Cleanup(format!("{label} failed with status {status}")))
+                }
+            });
+        on_completed();
+
+        match result {
+            Ok(()) => {
+                summary.applied += 1;
+                summary.freed_estimate =
+                    summary.freed_estimate.saturating_add(candidate.estimated_size());
+            }
+            Err(error) => errors.push(error),
         }
-        applied += 1;
-        freed_estimate = freed_estimate.saturating_add(candidate.estimated_size());
-        on_applied();
     }
 
-    Ok(ApplySummary { applied, failed, freed_estimate })
+    if errors.is_empty() { Ok(summary) } else { Err(group_error("process actions", errors)) }
+}
+
+fn group_error(group: &str, errors: Vec<AppError>) -> AppError {
+    let details = errors.iter().map(ToString::to_string).collect::<Vec<_>>().join("; ");
+    AppError::Cleanup(format!("{group} failed: {details}"))
+}
+
+fn combine_results(
+    paths: Result<ApplySummary, AppError>,
+    processes: Result<ApplySummary, AppError>,
+) -> Result<ApplySummary, AppError> {
+    match (paths, processes) {
+        (Ok(paths), Ok(processes)) => Ok(paths.merge(processes)),
+        (Err(error), Ok(_)) | (Ok(_), Err(error)) => Err(error),
+        (Err(path_error), Err(process_error)) => Err(AppError::Cleanup(format!(
+            "multiple action groups failed: paths: {path_error}; processes: {process_error}"
+        ))),
+    }
+}
+
+fn prepare_root_paths(candidates: &[Candidate]) -> Result<Vec<PathRemoval>, AppError> {
+    let paths = prepare_paths(candidates)?;
+    let roots = paths
+        .iter()
+        .filter(|candidate| {
+            !paths.iter().any(|other| is_strict_descendant(&candidate.path, &other.path))
+        })
+        .cloned()
+        .collect();
+    Ok(roots)
 }
 
 fn prepare_paths(candidates: &[Candidate]) -> Result<Vec<PathRemoval>, AppError> {
@@ -143,18 +224,13 @@ mod tests {
             Candidate::directory(TARGET, directory.path().to_path_buf()),
             Candidate::file(TARGET, file.path().to_path_buf()),
         ];
-        let applied = AtomicUsize::new(0);
 
-        let summary = apply_candidates(&candidates, || {
-            applied.fetch_add(1, Ordering::Relaxed);
-        })
-        .expect("cleanup succeeds");
+        let summary = apply_candidates(&candidates, |_| {}, || {}).expect("cleanup succeeds");
 
         directory.assert(predicates::path::missing());
         file.assert(predicates::path::missing());
         assert_eq!(summary.applied, 2);
         assert_eq!(summary.failed, 0);
-        assert_eq!(applied.load(Ordering::Relaxed), 2);
     }
 
     #[test]
@@ -163,7 +239,8 @@ mod tests {
         let missing = temp.path().join("missing");
         let candidates = vec![Candidate::directory(TARGET, missing.clone())];
 
-        let summary = apply_candidates(&candidates, || {}).expect("missing path is tolerated");
+        let summary =
+            apply_candidates(&candidates, |_| {}, || {}).expect("missing path is tolerated");
 
         assert!(!missing.exists());
         assert_eq!(summary.applied, 1);
@@ -171,7 +248,7 @@ mod tests {
     }
 
     #[test]
-    fn nested_candidates_collapse_to_the_selected_ancestor() {
+    fn nested_candidates_report_and_complete_one_root_action() {
         let temp = TempDir::new().expect("temp directory is created");
         let parent = temp.child("node_modules");
         let child = parent.child("pkg/__pycache__");
@@ -181,11 +258,58 @@ mod tests {
             Candidate::directory(TARGET, parent.path().to_path_buf()),
             Candidate::directory(TARGET, child.path().to_path_buf()),
         ];
+        let planned = AtomicUsize::new(0);
+        let completed = AtomicUsize::new(0);
 
-        let summary = apply_candidates(&candidates, || {}).expect("cleanup succeeds");
+        let summary = apply_candidates(
+            &candidates,
+            |count| planned.store(count, Ordering::Relaxed),
+            || {
+                completed.fetch_add(1, Ordering::Relaxed);
+            },
+        )
+        .expect("cleanup succeeds");
 
         parent.assert(predicates::path::missing());
         assert_eq!(summary.applied, 1);
         assert_eq!(summary.failed, 0);
+        assert_eq!(planned.load(Ordering::Relaxed), 1);
+        assert_eq!(completed.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn process_action_runs_and_failures_combine_when_path_removal_fails() {
+        let temp = TempDir::new().expect("temp directory is created");
+        let directory = temp.child("directory-passed-as-file");
+        directory.create_dir_all().expect("directory exists");
+        let script = temp.child("record.sh");
+        script.write_str("printf invoked > \"$1\"\nexit 7\n").expect("script exists");
+        let marker = temp.path().join("process-invoked");
+        let script_arg: &'static str =
+            Box::leak(script.path().to_string_lossy().into_owned().into_boxed_str());
+        let marker_arg: &'static str =
+            Box::leak(marker.to_string_lossy().into_owned().into_boxed_str());
+        let args: &'static [&'static str] =
+            Box::leak(vec![script_arg, marker_arg].into_boxed_slice());
+        let candidates = vec![
+            Candidate::file(TARGET, directory.path().to_path_buf()),
+            Candidate::process(TARGET, "record process", "/bin/sh", args, 0),
+        ];
+        let planned = AtomicUsize::new(0);
+        let completed = AtomicUsize::new(0);
+
+        let result = apply_candidates(
+            &candidates,
+            |count| planned.store(count, Ordering::Relaxed),
+            || {
+                completed.fetch_add(1, Ordering::Relaxed);
+            },
+        );
+
+        let error = result.expect_err("both action groups fail");
+        assert!(error.to_string().contains("multiple action groups failed"));
+        assert_eq!(std::fs::read_to_string(marker).expect("process recorded"), "invoked");
+        assert_eq!(planned.load(Ordering::Relaxed), 2);
+        assert_eq!(completed.load(Ordering::Relaxed), 2);
     }
 }
