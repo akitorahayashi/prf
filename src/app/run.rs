@@ -56,11 +56,11 @@ pub fn execute(options: RunOptions) -> Result<(), AppError> {
         return Ok(());
     }
 
-    let plan = subset.removal_plan()?;
+    let plan = subset.removal_plan();
     let deletion_bar = progress.add(ProgressBar::new(0));
     deletion_bar.set_style(deletion_progress_style());
     let result = apply_plan(
-        &plan,
+        plan,
         subset.footprint(),
         |count| deletion_bar.set_length(count as u64),
         || deletion_bar.inc(1),

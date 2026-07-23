@@ -43,7 +43,7 @@ pub struct ScanReport {
     catalog: Arc<RemovalCatalog>,
     footprint: Arc<Index>,
     reports: BTreeMap<TargetId, TargetReport>,
-    selected: Vec<usize>,
+    plan: RemovalPlan,
     estimate: Estimate,
 }
 
@@ -54,7 +54,7 @@ impl ScanReport {
             catalog: Arc::new(RemovalCatalog::default()),
             footprint: Arc::new(Index::default()),
             reports: BTreeMap::new(),
-            selected: Vec::new(),
+            plan: RemovalPlan::default(),
             estimate: Estimate::ZERO,
         }
     }
@@ -124,7 +124,7 @@ impl ScanReport {
             );
         }
 
-        Ok(Self { candidates, catalog, footprint, reports, selected, estimate: breakdown.total() })
+        Ok(Self { candidates, catalog, footprint, reports, plan, estimate: breakdown.total() })
     }
 
     pub const fn estimate(&self) -> Estimate {
@@ -161,8 +161,8 @@ impl ScanReport {
         Ok(self.footprint.breakdown(plan.roots(), plan.reported())?.total())
     }
 
-    pub fn removal_plan(&self) -> Result<RemovalPlan, AppError> {
-        self.catalog.plan(&self.candidates, &self.selected)
+    pub const fn removal_plan(&self) -> &RemovalPlan {
+        &self.plan
     }
 
     pub fn footprint(&self) -> &Index {
@@ -170,7 +170,7 @@ impl ScanReport {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.selected.is_empty()
+        self.plan.action_count() == 0
     }
 }
 
