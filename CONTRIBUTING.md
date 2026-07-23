@@ -31,6 +31,7 @@ just setup
 ### Verify Commands
 
 ```bash
+just fix
 just check
 just test
 ```

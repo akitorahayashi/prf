@@ -2,8 +2,6 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use dirs_next as dirs;
-
 use crate::error::AppError;
 
 use super::category::Category;
@@ -20,20 +18,21 @@ impl XcodeTarget {
         Self { current }
     }
 
-    fn global_safe_paths() -> Vec<PathBuf> {
-        let mut paths = Vec::new();
-        if let Some(home) = dirs::home_dir() {
-            let lib = home.join("Library");
-            paths.push(lib.join("Developer/Xcode/DerivedData"));
-            paths.push(lib.join("Caches/com.apple.dt.Xcode"));
-            paths.push(lib.join("Developer/Xcode/DocumentationCache"));
-            paths.push(lib.join("Developer/Xcode/DocumentationIndex"));
-            paths.push(lib.join("Developer/Xcode/UserData/Previews"));
-            paths.push(lib.join("Caches/org.swift.swiftpm"));
-            paths.push(lib.join("org.swift.swiftpm"));
-            paths.push(lib.join("Developer/CoreSimulator/Caches"));
-        }
-        paths
+    fn global_safe_paths() -> Result<Vec<PathBuf>, AppError> {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or(AppError::HomeDirectoryUnavailable)?;
+        let lib = home.join("Library");
+        Ok(vec![
+            lib.join("Developer/Xcode/DerivedData"),
+            lib.join("Caches/com.apple.dt.Xcode"),
+            lib.join("Developer/Xcode/DocumentationCache"),
+            lib.join("Developer/Xcode/DocumentationIndex"),
+            lib.join("Developer/Xcode/UserData/Previews"),
+            lib.join("Caches/org.swift.swiftpm"),
+            lib.join("org.swift.swiftpm"),
+            lib.join("Developer/CoreSimulator/Caches"),
+        ])
     }
 
     fn add_path(
@@ -71,7 +70,7 @@ impl XcodeTarget {
 
     fn scan_global_caches(&self) -> Result<Vec<CleanupItem>, AppError> {
         let mut items = Vec::new();
-        for path in Self::global_safe_paths() {
+        for path in Self::global_safe_paths()? {
             match fs::symlink_metadata(&path) {
                 Ok(_) => {
                     let authority = CleanupItem::user_authority(&path)?;

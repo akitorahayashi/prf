@@ -6,8 +6,10 @@ Testing is organized by ownership boundary and externally observable behavior:
 
 | Boundary | Location | Purpose |
 |---|---|---|
-| Owner unit tests | `src/app/**/*.rs`, `src/targets/**/*.rs`, `src/fs/**/*.rs` | Owner-local behavior verification inside `#[cfg(test)]` blocks |
-| Integration tests | `tests/scan.rs`, `tests/run.rs`, `tests/aliases.rs` | CLI contract verification through compiled binary execution |
+| Owner unit tests | `src/app/`, `src/targets/`, `src/fs/` | Owner-local behavior verification inside `#[cfg(test)]` blocks |
+| CLI integration tests | `tests/cli/` via `tests/cli.rs` | Command, output, selection, Docker, help, and alias contracts |
+| Safety integration tests | `tests/safety.rs` | Scope, confirmation, and usage-error contracts |
+| Runtime integration tests | `tests/runtime.rs` | Compiled binary and unknown-command contracts |
 
 ## Principles
 
@@ -17,18 +19,18 @@ Testing is organized by ownership boundary and externally observable behavior:
 
 ## Execution
 
-Run all tests:
+All tests execute via:
 
 ```bash
 just test
 ```
 
-Run by integration test target:
+The CLI integration target executes via:
 
 ```bash
-cargo test --test scan
-cargo test --test run
-cargo test --test aliases
+cargo test --test cli
+cargo test --test safety
+cargo test --test runtime
 ```
 
 Run a specific module test:

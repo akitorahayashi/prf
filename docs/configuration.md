@@ -16,14 +16,14 @@
 
 ## Runtime Configuration
 
-The CLI currently uses command-line flags as the primary runtime configuration surface.
+The CLI uses command-line arguments as its only runtime configuration surface.
 
 - Category selection: `--type`, `--all`
 - Scope selection: `--current` or explicit path arguments
 - Deletion confirmation control: `-y/--yes`
 - Verbose reporting: `-v/--verbose`
 
-Debug logging for run flow can be enabled with environment variable `PRF_DEBUG`.
+No environment variable changes cleanup behavior or enables a hidden diagnostic mode.
 
 ## CI/CD Contract
 

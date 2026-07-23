@@ -1,8 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
 
-use dirs_next as dirs;
-
 use crate::error::AppError;
 
 use super::category::Category;
@@ -16,12 +14,11 @@ impl BrewTarget {
         Self
     }
 
-    fn brew_paths() -> Vec<PathBuf> {
-        dirs::home_dir()
-            .map(|home| {
-                vec![home.join("Library/Caches/Homebrew"), home.join("Library/Logs/Homebrew")]
-            })
-            .unwrap_or_default()
+    fn brew_paths() -> Result<Vec<PathBuf>, AppError> {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or(AppError::HomeDirectoryUnavailable)?;
+        Ok(vec![home.join("Library/Caches/Homebrew"), home.join("Library/Logs/Homebrew")])
     }
 }
 
@@ -38,7 +35,7 @@ impl CleanupTarget for BrewTarget {
 
     fn discover(&self, _scope: &ScanScope) -> Result<DiscoveryOutcome, AppError> {
         let mut items = Vec::new();
-        for path in Self::brew_paths() {
+        for path in Self::brew_paths()? {
             match fs::symlink_metadata(&path) {
                 Ok(_) => {
                     let authority = CleanupItem::user_authority(&path)?;

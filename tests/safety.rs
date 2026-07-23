@@ -74,3 +74,66 @@ fn nonexistent_root_is_an_operational_error() {
         .code(1)
         .stderr(predicate::str::contains("Invalid scan root"));
 }
+
+#[test]
+fn missing_default_desktop_has_no_fallback_root() {
+    let ctx = TestContext::new();
+
+    ctx.cli()
+        .arg("scan")
+        .arg("--type")
+        .arg("python")
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("Desktop"))
+        .stderr(predicate::str::contains("Invalid scan root"));
+}
+
+#[test]
+fn yes_does_not_expand_category_scope() {
+    let ctx = TestContext::new();
+    let python = ctx.write_home_file("workspace/__pycache__/module.pyc", "cache");
+    let node = ctx.write_home_file("workspace/node_modules/index.js", "cache");
+    let python_dir = python.parent().expect("Python cache has a parent").to_path_buf();
+    let node_dir = node.parent().expect("Node cache has a parent").to_path_buf();
+
+    ctx.cli()
+        .arg("run")
+        .arg("--type")
+        .arg("python")
+        .arg("--yes")
+        .arg(ctx.home())
+        .assert()
+        .success();
+
+    assert!(!python_dir.exists(), "selected Python cache is removed");
+    assert!(node_dir.exists(), "unselected Node cache remains");
+}
+
+#[test]
+fn nested_cross_category_candidates_execute_once() {
+    let ctx = TestContext::new();
+    let nested =
+        ctx.write_home_file("workspace/DerivedData/node_modules/index.js", "generated content");
+    let derived_data = nested
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("nested target has a DerivedData ancestor")
+        .to_path_buf();
+
+    ctx.cli()
+        .arg("run")
+        .arg("--type")
+        .arg("nodejs")
+        .arg("--type")
+        .arg("xcode")
+        .arg("--yes")
+        .arg(ctx.home())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Cleanup summary: 1 removed, 0 skipped, 0 failed"))
+        .stdout(predicate::str::contains("[xcode,nodejs]"));
+
+    assert!(!derived_data.exists(), "normalized ancestor candidate is removed once");
+}
