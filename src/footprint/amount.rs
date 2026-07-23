@@ -19,12 +19,6 @@ impl Estimate {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Basis {
-    Allocated,
-    Reported(Estimate),
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -3,7 +3,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
-use crate::footprint::{Basis, Estimate, Root, RootId};
+use crate::footprint::{Estimate, Root, RootId};
 
 use super::{Action, Candidate, EntryKind};
 
@@ -28,8 +28,8 @@ impl RemovalCatalog {
         let mut candidate_roots = Vec::with_capacity(candidates.len());
 
         for candidate in &candidates {
-            match (&candidate.action, candidate.basis()) {
-                (Action::RemovePath { path, kind }, Basis::Allocated) => {
+            match candidate.action() {
+                Action::RemovePath { path, kind } => {
                     let resolved = normalize_terminal_entry(path)?;
 
                     if let Some(index) = roots_by_path.get(&resolved).copied() {
@@ -48,13 +48,7 @@ impl RemovalCatalog {
                     roots.push(CatalogRoot { id, path: resolved, kind: *kind });
                     candidate_roots.push(Some(id));
                 }
-                (Action::RunProcess { .. }, Basis::Reported(_)) => candidate_roots.push(None),
-                (Action::RemovePath { .. }, Basis::Reported(_))
-                | (Action::RunProcess { .. }, Basis::Allocated) => {
-                    return Err(AppError::Cleanup(
-                        "candidate action and footprint basis do not match".to_string(),
-                    ));
-                }
+                Action::RunProcess { .. } => candidate_roots.push(None),
             }
         }
 
@@ -114,35 +108,24 @@ impl RemovalCatalog {
                     .find(|index| self.candidate_roots[*index] == Some(root_id))
                     .expect("selected root has a source candidate");
 
-                PathRemoval {
-                    root: root_id,
-                    path: root.path.clone(),
-                    kind: root.kind,
-                    candidates,
-                    attribution,
-                }
+                PathRemoval { root: root_id, path: root.path.clone(), kind: root.kind, attribution }
             })
             .collect();
 
         let mut processes = Vec::new();
         for index in selected {
             let candidate = &self.candidates[index];
-            match (&candidate.action, candidate.basis()) {
-                (Action::RunProcess { label, program, args }, Basis::Reported(estimate)) => {
+            match candidate.action() {
+                Action::RunProcess { label, program, args, estimate } => {
                     processes.push(ProcessRemoval {
                         candidate: index,
                         label,
                         program,
                         args,
-                        estimate,
+                        estimate: *estimate,
                     })
                 }
-                (Action::RemovePath { .. }, Basis::Allocated) => {}
-                _ => {
-                    return Err(AppError::Cleanup(
-                        "candidate action and footprint basis do not match".to_string(),
-                    ));
-                }
+                Action::RemovePath { .. } => {}
             }
         }
 
@@ -178,7 +161,6 @@ pub struct PathRemoval {
     root: RootId,
     path: PathBuf,
     kind: EntryKind,
-    candidates: Vec<usize>,
     attribution: usize,
 }
 
@@ -193,10 +175,6 @@ impl PathRemoval {
 
     pub const fn kind(&self) -> EntryKind {
         self.kind
-    }
-
-    pub fn candidates(&self) -> &[usize] {
-        &self.candidates
     }
 
     pub const fn attribution(&self) -> usize {
@@ -296,7 +274,7 @@ mod tests {
 
         assert_eq!(plan.paths().len(), 1);
         assert_eq!(plan.paths()[0].path(), parent.path().canonicalize().unwrap());
-        assert_eq!(plan.paths()[0].candidates(), &[0, 1, 2, 3]);
+        assert_eq!(plan.paths()[0].attribution(), 0);
     }
 
     #[cfg(unix)]

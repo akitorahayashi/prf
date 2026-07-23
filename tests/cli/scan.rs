@@ -103,6 +103,31 @@ fn scan_reports_missing_docker_as_a_diagnostic() {
 }
 
 #[test]
+fn scan_requires_home_only_for_the_default_root() {
+    let ctx = TestContext::new();
+
+    ctx.cli()
+        .env_remove("HOME")
+        .arg("scan")
+        .arg("--type")
+        .arg("python")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("HOME is not set"));
+}
+
+#[test]
+fn explicit_roots_work_without_home_and_report_home_discovery_once() {
+    let ctx = TestContext::new();
+    let root = ctx.work_dir().join("workspace");
+    std::fs::create_dir_all(&root).expect("explicit root exists");
+
+    ctx.cli().env_remove("HOME").arg("scan").arg("--list").arg(&root).assert().success().stderr(
+        predicate::str::contains("Home directory is unavailable for global discovery").count(1),
+    );
+}
+
+#[test]
 fn scan_rejects_malformed_docker_output() {
     let ctx = TestContext::new();
     ctx.create_mock_command(
@@ -191,7 +216,12 @@ fn scan_reports_allocated_footprint_for_sparse_files() {
         .expect("logical length is set");
     let allocated = fs::metadata(&cache).unwrap().blocks() * 512
         + fs::metadata(&sparse).unwrap().blocks() * 512;
-    let expected = prf::output::bytes::format_bytes(allocated);
+    let expected = if allocated == 0 {
+        "0 B".to_string()
+    } else {
+        assert!(allocated < 10_000, "fixture allocation exceeded the expected SI range");
+        format!("{:.1} KB", allocated as f64 / 1_000.0)
+    };
 
     ctx.cli()
         .arg("scan")

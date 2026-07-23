@@ -1,7 +1,6 @@
+use std::collections::HashSet;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-
-use dirs_next as dirs;
 
 use crate::cleanup::{
     Action, ActionOutcome, ApplyReport, Inspection, Listing, PathStatus, ProcessStatus, ScanReport,
@@ -12,8 +11,8 @@ use crate::error::AppError;
 use super::bytes::format_bytes;
 use super::messages;
 
-pub fn display_path(path: &Path) -> String {
-    if let Some(stripped) = dirs::home_dir().and_then(|home| path.strip_prefix(&home).ok()) {
+pub fn display_path(path: &Path, home: Option<&Path>) -> String {
+    if let Some(stripped) = home.and_then(|home| path.strip_prefix(home).ok()) {
         let mut display = PathBuf::from("~");
         display.push(stripped);
         return display.display().to_string();
@@ -22,9 +21,9 @@ pub fn display_path(path: &Path) -> String {
     path.display().to_string()
 }
 
-fn candidate_display(action: &Action) -> String {
+fn candidate_display(action: &Action, home: Option<&Path>) -> String {
     match action {
-        Action::RemovePath { path, .. } => display_path(path),
+        Action::RemovePath { path, .. } => display_path(path, home),
         Action::RunProcess { label, .. } => (*label).to_string(),
     }
 }
@@ -37,8 +36,11 @@ pub fn print_stdout_line(message: &str) -> Result<(), AppError> {
 pub fn print_diagnostics(inspections: &[Inspection]) -> Result<(), AppError> {
     let stderr = io::stderr();
     let mut output = stderr.lock();
+    let mut rendered = HashSet::new();
     for diagnostic in inspections.iter().flat_map(|inspection| &inspection.diagnostics) {
-        writeln!(output, "Warning: {}", diagnostic.message)?;
+        if rendered.insert(&diagnostic.message) {
+            writeln!(output, "Warning: {}", diagnostic.message)?;
+        }
     }
     Ok(())
 }
@@ -47,6 +49,7 @@ pub fn print_scan_report(
     report: &ScanReport,
     targets: &[&Target],
     verbose: bool,
+    home: Option<&Path>,
 ) -> Result<(), AppError> {
     let stdout = io::stdout();
     let mut output = stdout.lock();
@@ -65,7 +68,7 @@ pub fn print_scan_report(
                     writeln!(
                         output,
                         "    • {:<60} {}",
-                        candidate_display(&candidate_report.candidate.action),
+                        candidate_display(candidate_report.candidate.action(), home),
                         format_bytes(candidate_report.estimate().bytes())
                     )?;
                 }
@@ -76,7 +79,11 @@ pub fn print_scan_report(
     Ok(())
 }
 
-pub fn print_list_results(targets: &[&Target], inspections: &[Inspection]) -> Result<(), AppError> {
+pub fn print_list_results(
+    targets: &[&Target],
+    inspections: &[Inspection],
+    home: Option<&Path>,
+) -> Result<(), AppError> {
     let stdout = io::stdout();
     let mut output = stdout.lock();
     writeln!(output, "Found cleanup targets:")?;
@@ -95,7 +102,7 @@ pub fn print_list_results(targets: &[&Target], inspections: &[Inspection]) -> Re
                     count,
                     if *count == 1 { "" } else { "s" }
                 )?,
-                Listing::Path(path) => writeln!(output, "- {} (exists)", path.display())?,
+                Listing::Path(path) => writeln!(output, "- {} (exists)", display_path(path, home))?,
                 Listing::Detail(detail) => writeln!(output, "- {detail}")?,
             };
         }
@@ -108,6 +115,7 @@ pub fn print_deletion_plan(
     report: &ScanReport,
     targets: &[&Target],
     verbose: bool,
+    home: Option<&Path>,
 ) -> Result<(), AppError> {
     let stdout = io::stdout();
     let mut output = stdout.lock();
@@ -126,14 +134,14 @@ pub fn print_deletion_plan(
                     writeln!(
                         output,
                         "    • {:<60} {}",
-                        candidate_display(&candidate_report.candidate.action),
+                        candidate_display(candidate_report.candidate.action(), home),
                         format_bytes(candidate_report.estimate().bytes())
                     )?;
                 } else {
                     writeln!(
                         output,
                         "    • {}",
-                        candidate_display(&candidate_report.candidate.action)
+                        candidate_display(candidate_report.candidate.action(), home)
                     )?;
                 }
             }
@@ -143,7 +151,11 @@ pub fn print_deletion_plan(
     Ok(())
 }
 
-pub fn print_cleanup_report(report: &ApplyReport, targets: usize) -> Result<(), AppError> {
+pub fn print_cleanup_report(
+    report: &ApplyReport,
+    targets: usize,
+    home: Option<&Path>,
+) -> Result<(), AppError> {
     {
         let stderr = io::stderr();
         let mut errors = stderr.lock();
@@ -153,11 +165,11 @@ pub fn print_cleanup_report(report: &ApplyReport, targets: usize) -> Result<(), 
                     writeln!(
                         errors,
                         "Retained: {} (the directory was not empty after cleanup)",
-                        display_path(path)
+                        display_path(path, home)
                     )?;
                 }
                 ActionOutcome::Path { path, status: PathStatus::Failed(error) } => {
-                    writeln!(errors, "Failed: {}: {error}", display_path(path))?;
+                    writeln!(errors, "Failed: {}: {error}", display_path(path, home))?;
                 }
                 ActionOutcome::Process { label, program, status: ProcessStatus::Failed(error) } => {
                     writeln!(errors, "Failed: {label} via '{program}': {error}")?;

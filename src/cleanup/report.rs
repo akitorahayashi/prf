@@ -22,7 +22,6 @@ impl CandidateReport {
 
 #[derive(Debug, Clone)]
 pub struct TargetReport {
-    pub target: TargetId,
     pub candidates: Vec<CandidateReport>,
     estimate: Estimate,
 }
@@ -30,10 +29,6 @@ pub struct TargetReport {
 impl TargetReport {
     pub const fn estimate(&self) -> Estimate {
         self.estimate
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.candidates.is_empty()
     }
 }
 
@@ -79,7 +74,7 @@ impl ScanReport {
             .iter()
             .enumerate()
             .filter_map(|(index, candidate)| {
-                selected_targets.contains(&candidate.target).then_some(index)
+                selected_targets.contains(&candidate.target()).then_some(index)
             })
             .collect::<Vec<_>>();
         let plan = catalog.plan(&selected)?;
@@ -97,7 +92,7 @@ impl ScanReport {
             let indices = candidates
                 .iter()
                 .enumerate()
-                .filter_map(|(index, candidate)| (candidate.target == *target).then_some(index))
+                .filter_map(|(index, candidate)| (candidate.target() == *target).then_some(index))
                 .collect::<Vec<_>>();
             if indices.is_empty() {
                 continue;
@@ -114,10 +109,7 @@ impl ScanReport {
                 .iter()
                 .map(CandidateReport::estimate)
                 .try_fold(Estimate::ZERO, Estimate::checked_add)?;
-            reports.insert(
-                *target,
-                TargetReport { target: *target, candidates: candidate_reports, estimate },
-            );
+            reports.insert(*target, TargetReport { candidates: candidate_reports, estimate });
         }
 
         Ok(Self { catalog, footprint, reports, plan, estimate: breakdown.total() })
@@ -147,7 +139,7 @@ impl ScanReport {
             .candidates()
             .iter()
             .enumerate()
-            .filter_map(|(index, candidate)| targets.contains(&candidate.target).then_some(index))
+            .filter_map(|(index, candidate)| targets.contains(&candidate.target()).then_some(index))
             .collect::<Vec<_>>();
         let plan = self.catalog.plan(&selected)?;
         Ok(self.footprint.breakdown(plan.roots(), plan.reported())?.total())

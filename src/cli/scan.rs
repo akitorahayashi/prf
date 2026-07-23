@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Args};
 
-use crate::cleanup::Target;
+use crate::cleanup::{ScopeMode, Target};
 use crate::error::AppError;
 use crate::targets::registry;
 
@@ -28,7 +28,7 @@ pub struct ScanArgs {
 }
 
 impl ScanArgs {
-    pub fn resolve_targets(&self) -> Result<Vec<&'static Target>, AppError> {
-        registry::resolve(&self.targets, self.all, self.current)
+    pub fn resolve_targets(&self, mode: ScopeMode) -> Result<Vec<&'static Target>, AppError> {
+        registry::resolve(&self.targets, self.all, mode)
     }
 }

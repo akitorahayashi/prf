@@ -14,8 +14,8 @@ home-relative discovery.
 
 ```text
 src/
-  main.rs          Process entry point delegating to the library CLI
-  lib.rs           Public module surface
+  main.rs          Process entry point delegating to the library facade
+  lib.rs           Minimal public CLI execution facade
   error.rs         Application error taxonomy
   cli/             Clap commands, target selection, root resolution, and app option conversion
   app/
@@ -23,9 +23,9 @@ src/
     run.rs         Scan, interactive selection, confirmation, and action application
   cleanup/
     target.rs      Target identity, scope support, and discovery contract
-    scope.rs       Scan roots and current-mode state
+    scope.rs       Resolved default or current scope and captured home
     discovery.rs   Standard discovery rules, inspections, diagnostics, and listings
-    candidate.rs   Concrete actions and their footprint measurement basis
+    candidate.rs   Target-attributed cleanup actions
     action.rs      Filesystem and process action vocabulary
     plan.rs        Scanned candidates and canonical roots shared by estimation and application
     report.rs      Target-grouped scan reports and selected subsets
@@ -86,12 +86,15 @@ the same normalized roots.
 ### Scope Semantics
 
 No path argument resolves to `~/Desktop`; an unset `HOME` is an error. Explicit paths replace only
-the recursive roots. In default mode, applicable `HomePaths` rules are still evaluated in addition
-to those roots.
+the recursive roots and continue without `HOME` while reporting unavailable home discovery once.
+Exact duplicate roots are removed while descendant roots remain distinct. In default mode,
+applicable `HomePaths` rules are still evaluated in addition to those roots.
 
 `--current` is not an alias for passing `.`. It resolves the current working directory, excludes
 targets whose `ScopeSupport` is `DefaultOnly`, and disables all `HomePaths` rules. Brew and Docker
-are currently default-only; Xcode, Python, Rust, and Node.js support both modes.
+are currently default-only; Xcode, Python, Rust, and Node.js support both modes. `Scope` represents
+default and current modes as distinct variants, and environment inputs are captured once by CLI
+resolution.
 
 ### Target Registry
 
@@ -135,9 +138,10 @@ links contribute once only when every reported link belongs to the selected remo
 The allocation walker shares one bounded Rayon pool across maximal candidate roots and nested
 directories. It retains per-root totals and multi-link inode observations rather than a display tree.
 An `Index` derives candidate contributions and aggregate estimates for arbitrary report subsets.
-Externally reported process estimates have a distinct `Basis` and remain outside path and inode
-normalization. Missing paths contribute zero; other metadata and traversal failures are explicit.
-APFS clones, snapshots, and concurrent filesystem changes keep all displayed values estimates.
+Process actions own their externally reported estimates, which remain outside path and inode
+normalization. Path actions always use allocated measurement. Missing paths contribute zero; other
+metadata and traversal failures are explicit. APFS clones, snapshots, and concurrent filesystem
+changes keep all displayed values estimates.
 
 ### Docker Inspection
 
@@ -158,9 +162,9 @@ confirmation remains required unless `-y/--yes` is supplied.
 ### Key Types
 
 - `Target` - registered metadata plus scope support and a `Discovery` contract.
-- `Scope` - resolved recursive roots and the current-mode flag.
+- `Scope` - either one current root or default roots with an optional captured home.
 - `Inspection` - candidates, list results, and diagnostics from one target.
-- `Candidate` - a target-attributed `Action` with an allocated or reported footprint basis.
+- `Candidate` - a target-attributed path or process action; the variant owns its footprint inputs.
 - `RemovalCatalog` - the owned scanned candidates, canonical physical roots, and their association.
 - `RemovalPlan` - a selected, non-overlapping subset shared by estimation and application.
 - `Estimate` - a checked byte amount produced from allocated or externally reported data.

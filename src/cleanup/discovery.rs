@@ -4,7 +4,6 @@ use std::io::ErrorKind;
 use std::path::Path;
 use std::path::PathBuf;
 
-use dirs_next as dirs;
 use walkdir::WalkDir;
 
 use crate::error::AppError;
@@ -100,8 +99,8 @@ fn inspect_rules(
         );
     }
 
-    if !scope.current() {
-        inspect_home_paths(target, rules, &mut inspection, &mut candidate_paths);
+    if !scope.is_current() {
+        inspect_home_paths(target, scope, rules, &mut inspection, &mut candidate_paths);
     }
 
     inspection.listings.splice(
@@ -198,6 +197,7 @@ fn inspect_roots(
 
 fn inspect_home_paths(
     target: TargetId,
+    scope: &Scope,
     rules: &[Rule],
     inspection: &mut Inspection,
     candidate_paths: &mut HashSet<PathBuf>,
@@ -208,7 +208,7 @@ fn inspect_home_paths(
     });
 
     let mut saw_home_rule = false;
-    let Some(home) = dirs::home_dir() else {
+    let Some(home) = scope.home() else {
         if home_paths.count() > 0 {
             inspection.diagnostics.push(Diagnostic {
                 message: "Home directory is unavailable for global discovery".to_string(),
@@ -281,7 +281,7 @@ fn add_classified_path(target: TargetId, path: PathBuf, inspection: &mut Inspect
 
 #[cfg(test)]
 fn candidate_path(candidate: &Candidate) -> Option<&Path> {
-    match &candidate.action {
+    match candidate.action() {
         super::Action::RemovePath { path, .. } => Some(path),
         super::Action::RunProcess { .. } => None,
     }
@@ -289,17 +289,18 @@ fn candidate_path(candidate: &Candidate) -> Option<&Path> {
 
 #[cfg(test)]
 mod tests {
-    use std::env;
-
     use assert_fs::TempDir;
     use assert_fs::prelude::*;
-    use serial_test::serial;
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
 
     use super::*;
     use crate::cleanup::{Action, EntryKind};
     const TEST_TARGET: TargetId = TargetId::new("test");
+
+    fn default_scope(roots: Vec<PathBuf>, home: Option<PathBuf>) -> Scope {
+        Scope::resolve(&roots, false, home, "/working".into()).expect("default scope resolves")
+    }
 
     fn candidate_paths(inspection: &Inspection) -> Vec<PathBuf> {
         inspection.candidates.iter().filter_map(candidate_path).map(Path::to_path_buf).collect()
@@ -314,7 +315,7 @@ mod tests {
         matched.create_dir_all().expect("matched directory exists");
         matched.child("index.js").write_str("cache").expect("cache file exists");
 
-        let scope = Scope::new(vec![temp.path().to_path_buf()], false);
+        let scope = default_scope(vec![temp.path().to_path_buf()], Some(temp.path().to_path_buf()));
         let inspection = inspect_rules(TEST_TARGET, &scope, RULES).expect("inspection succeeds");
 
         assert_eq!(candidate_paths(&inspection), vec![matched.path().to_path_buf()]);
@@ -334,7 +335,7 @@ mod tests {
         temp.child("crate/Cargo.toml").write_str("[package]").expect("manifest exists");
         temp.child("other/target").create_dir_all().expect("unowned target exists");
 
-        let scope = Scope::new(vec![temp.path().to_path_buf()], false);
+        let scope = default_scope(vec![temp.path().to_path_buf()], Some(temp.path().to_path_buf()));
         let inspection = inspect_rules(TEST_TARGET, &scope, RULES).expect("inspection succeeds");
 
         assert_eq!(candidate_paths(&inspection), vec![owned.path().to_path_buf()]);
@@ -354,7 +355,7 @@ mod tests {
         let build = package.child(".build");
         build.create_dir_all().expect("build directory exists");
 
-        let scope = Scope::new(vec![temp.path().to_path_buf()], false);
+        let scope = default_scope(vec![temp.path().to_path_buf()], Some(temp.path().to_path_buf()));
         let inspection = inspect_rules(TEST_TARGET, &scope, RULES).expect("inspection succeeds");
 
         assert_eq!(candidate_paths(&inspection), vec![build.path().to_path_buf()]);
@@ -389,12 +390,12 @@ mod tests {
         symlink(temp.path().join("missing"), package.path().join("dangling-link"))
             .expect("dangling link exists");
 
-        let scope = Scope::new(vec![temp.path().to_path_buf()], false);
+        let scope = default_scope(vec![temp.path().to_path_buf()], Some(temp.path().to_path_buf()));
         let inspection = inspect_rules(TEST_TARGET, &scope, RULES).expect("inspection succeeds");
 
         assert_eq!(inspection.candidates.len(), 3);
         assert!(inspection.candidates.iter().all(|candidate| matches!(
-            candidate.action,
+            candidate.action(),
             Action::RemovePath { kind: EntryKind::Symlink, .. }
         )));
     }
@@ -412,12 +413,13 @@ mod tests {
         let link = project.child("node_modules");
         symlink(outside.path(), link.path()).expect("directory link exists");
 
-        let scope = Scope::new(vec![project.path().to_path_buf()], false);
+        let scope =
+            default_scope(vec![project.path().to_path_buf()], Some(temp.path().to_path_buf()));
         let inspection = inspect_rules(TEST_TARGET, &scope, RULES).expect("inspection succeeds");
 
         assert_eq!(inspection.candidates.len(), 1);
         assert!(matches!(
-            inspection.candidates[0].action,
+            inspection.candidates[0].action(),
             Action::RemovePath { kind: EntryKind::Symlink, .. }
         ));
     }
@@ -429,7 +431,7 @@ mod tests {
         let temp = TempDir::new().expect("temp directory is created");
         let missing = temp.path().join("missing");
 
-        let scope = Scope::new(vec![missing.clone()], false);
+        let scope = default_scope(vec![missing.clone()], Some(temp.path().to_path_buf()));
         let inspection = inspect_rules(TEST_TARGET, &scope, RULES).expect("inspection succeeds");
 
         assert_eq!(
@@ -440,49 +442,20 @@ mod tests {
         );
     }
 
-    struct HomeGuard {
-        original: Option<String>,
-    }
-
-    impl HomeGuard {
-        fn set(path: &PathBuf) -> Self {
-            let original = env::var("HOME").ok();
-            unsafe {
-                env::set_var("HOME", path);
-            }
-            Self { original }
-        }
-    }
-
-    impl Drop for HomeGuard {
-        fn drop(&mut self) {
-            if let Some(home) = &self.original {
-                unsafe {
-                    env::set_var("HOME", home);
-                }
-            } else {
-                unsafe {
-                    env::remove_var("HOME");
-                }
-            }
-        }
-    }
-
     #[test]
-    #[serial]
     fn home_rules_are_excluded_from_current_mode() {
         const RULES: &[Rule] = &[Rule::HomePaths { paths: &["Library/Caches/example"] }];
         let home = TempDir::new().expect("temp home is created");
         let cache = home.child("Library/Caches/example");
         cache.create_dir_all().expect("cache exists");
-        let _guard = HomeGuard::set(&home.path().to_path_buf());
-
-        let default_scope = Scope::new(Vec::new(), false);
+        let default_scope = default_scope(Vec::new(), Some(home.path().to_path_buf()));
         let default_inspection =
             inspect_rules(TEST_TARGET, &default_scope, RULES).expect("default inspection succeeds");
         assert_eq!(candidate_paths(&default_inspection), vec![cache.path().to_path_buf()]);
 
-        let current_scope = Scope::new(Vec::new(), true);
+        let current_scope =
+            Scope::resolve(&[], true, Some(home.path().to_path_buf()), home.path().to_path_buf())
+                .expect("current scope resolves");
         let current_inspection =
             inspect_rules(TEST_TARGET, &current_scope, RULES).expect("current inspection succeeds");
         assert!(current_inspection.candidates.is_empty());

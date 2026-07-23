@@ -42,6 +42,7 @@ impl Root {
         Self { id, path }
     }
 
+    #[cfg(test)]
     pub const fn id(&self) -> RootId {
         self.id
     }
@@ -54,6 +55,7 @@ impl Root {
 #[derive(Debug, Clone, Default)]
 pub struct Breakdown {
     paths: BTreeMap<RootId, Estimate>,
+    #[cfg(test)]
     reported: Estimate,
     total: Estimate,
 }
@@ -63,6 +65,7 @@ impl Breakdown {
         self.paths.get(&root).copied().unwrap_or(Estimate::ZERO)
     }
 
+    #[cfg(test)]
     pub const fn reported(&self) -> Estimate {
         self.reported
     }
@@ -146,7 +149,12 @@ impl Index {
         let reported = reported.into_iter().try_fold(Estimate::ZERO, Estimate::checked_add)?;
         let total = path_total.checked_add(reported)?;
 
-        Ok(Breakdown { paths, reported, total })
+        Ok(Breakdown {
+            paths,
+            #[cfg(test)]
+            reported,
+            total,
+        })
     }
 
     fn normalize_selection<I>(&self, roots: I) -> Result<Vec<RootId>, Error>

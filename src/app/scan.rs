@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,27 +13,24 @@ use crate::output::report::{print_diagnostics, print_list_results, print_scan_re
 
 pub struct ScanOptions {
     pub targets: Vec<&'static Target>,
-    pub roots: Vec<PathBuf>,
+    pub scope: Scope,
     pub verbose: bool,
-    pub current: bool,
 }
 
 pub fn execute(options: ScanOptions) -> Result<ScanReport, AppError> {
-    let scope = Scope::new(options.roots, options.current);
     let progress = Arc::new(MultiProgress::new());
-    let report = scan_targets(&options.targets, &scope, &progress)?;
-    print_scan_report(&report, &options.targets, options.verbose)?;
+    let report = scan_targets(&options.targets, &options.scope, &progress)?;
+    print_scan_report(&report, &options.targets, options.verbose, options.scope.home())?;
     Ok(report)
 }
 
 pub fn list_targets(options: ScanOptions) -> Result<(), AppError> {
-    let scope = Scope::new(options.roots, options.current);
     let inspections: Result<Vec<Inspection>, AppError> =
-        options.targets.par_iter().map(|target| target.inspect(&scope)).collect();
+        options.targets.par_iter().map(|target| target.inspect(&options.scope)).collect();
     let inspections = inspections?;
 
     print_diagnostics(&inspections)?;
-    print_list_results(&options.targets, &inspections)?;
+    print_list_results(&options.targets, &inspections, options.scope.home())?;
     Ok(())
 }
 

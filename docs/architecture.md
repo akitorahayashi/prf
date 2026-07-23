@@ -4,8 +4,8 @@
 
 - Target: A registered cleanup definition with an identifier, display name, scope support, and
   discovery contract.
-- Candidate: A concrete, scanned cleanup action with an allocated or externally reported footprint
-  basis.
+- Candidate: A target-attributed path or process action whose variant determines its footprint
+  inputs.
 - Removal Catalog: The owned scanned candidates, canonical physical roots, and their association.
 - Scan Report: Target-grouped candidates plus the footprint data required for later subsets.
 - Removal Plan: A user-selected, non-overlapping subset shared by footprint aggregation and action
@@ -15,7 +15,7 @@
 
 | Boundary | Path | Responsibility |
 |---|---|---|
-| Binary entry | `src/main.rs` | Process entry delegation to the library CLI runner |
+| Binary entry | `src/main.rs`, `src/lib.rs` | Process entry and minimal public execution facade |
 | CLI adapter | `src/cli/` | Clap parsing, target resolution, and app option conversion |
 | Application orchestration | `src/app/` | Scan and run use-case sequencing |
 | Cleanup domain | `src/cleanup/` | Target contracts, discovery, candidates, removal plans, application, and reports |
@@ -66,7 +66,6 @@ src/
 │   └── xcode.rs
 ├── fs/
 │   ├── mod.rs
-│   ├── roots.rs
 │   └── remove.rs
 └── output/
     ├── mod.rs
@@ -98,10 +97,10 @@ output are errors rather than empty successful scans.
 
 ## Action Model
 
-`RemovePath` and `RunProcess` form the finite action vocabulary. Each candidate also declares whether
-its footprint is allocated storage or an externally reported estimate. Files, directories, and
-terminal symbolic links are distinct removal entry kinds. Action application is exhaustive in the
-cleanup domain and delegates low-level filesystem operations to `src/fs/`.
+`RemovePath` and `RunProcess` form the finite action vocabulary. A path action always uses allocated
+storage measurement, while a process action owns its externally reported estimate. Files,
+directories, and terminal symbolic links are distinct removal entry kinds. Action application is
+exhaustive in the cleanup domain and delegates low-level filesystem operations to `src/fs/`.
 Process actions use an executable and separated argument vector without a shell.
 
 Every applied action originates from the selected scan report. Application and output code contain

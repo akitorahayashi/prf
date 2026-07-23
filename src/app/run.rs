@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use indicatif::{MultiProgress, ProgressBar};
@@ -15,16 +14,14 @@ use super::scan::scan_targets;
 pub struct RunOptions {
     pub targets: Vec<&'static Target>,
     pub interactive: bool,
-    pub roots: Vec<PathBuf>,
+    pub scope: Scope,
     pub verbose: bool,
     pub assume_yes: bool,
-    pub current: bool,
 }
 
 pub fn execute(options: RunOptions) -> Result<(), AppError> {
-    let scope = Scope::new(options.roots, options.current);
     let progress = Arc::new(MultiProgress::new());
-    let report = scan_targets(&options.targets, &scope, &progress)?;
+    let report = scan_targets(&options.targets, &options.scope, &progress)?;
 
     if report.is_empty() {
         print_stdout_line(messages::nothing_to_delete())?;
@@ -50,7 +47,7 @@ pub fn execute(options: RunOptions) -> Result<(), AppError> {
         return Ok(());
     }
 
-    print_deletion_plan(&subset, &selected_targets, options.verbose)?;
+    print_deletion_plan(&subset, &selected_targets, options.verbose, options.scope.home())?;
     if !options.assume_yes && !confirm_deletion(subset.estimate().bytes())? {
         print_stdout_line(messages::aborted())?;
         return Ok(());
@@ -68,7 +65,7 @@ pub fn execute(options: RunOptions) -> Result<(), AppError> {
     deletion_bar.finish_and_clear();
 
     progress.println(messages::deletion_complete(report.planned_count(), plan.action_count()))?;
-    print_cleanup_report(&report, subset.target_ids().len())?;
+    print_cleanup_report(&report, subset.target_ids().len(), options.scope.home())?;
     if report.is_complete() {
         Ok(())
     } else {

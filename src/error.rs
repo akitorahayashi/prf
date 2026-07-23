@@ -22,6 +22,9 @@ pub enum AppError {
     #[error("Invalid target registry: {0}")]
     InvalidTargetRegistry(String),
 
+    #[error("Invalid scan scope: {0}")]
+    InvalidScope(String),
+
     #[error("Discovery failed: {0}")]
     Discovery(String),
 
