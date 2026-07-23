@@ -1,7 +1,6 @@
 use crate::error::AppError;
 
 use super::category::Category;
-use super::item::CleanupItem;
 use super::name_matcher::NameMatcherTarget;
 use super::target::{CleanupTarget, DiscoveryOutcome, ScanScope};
 

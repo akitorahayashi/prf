@@ -15,7 +15,9 @@ pub enum AppError {
     #[error("Category index out of range: {0}")]
     CategoryIndexOutOfRange(String),
 
-    #[error("Category not supported with --current: {0}")]
+    #[error(
+        "Category not supported with --current: {0}; remove --current or select a local category"
+    )]
     UnsupportedCurrentModeCategory(String),
 
     #[error("No targets to scan: {0}")]
@@ -56,4 +58,13 @@ pub enum AppError {
 
     #[error("Operation cancelled by user")]
     Cancelled,
+}
+
+impl AppError {
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            AppError::UnsupportedCurrentModeCategory(_) => 2,
+            _ => 1,
+        }
+    }
 }

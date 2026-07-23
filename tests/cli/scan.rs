@@ -75,3 +75,49 @@ fn scan_finds_uv_cache_beyond_the_previous_depth_limit() {
         .success()
         .stdout(predicate::str::contains(".uv-cache"));
 }
+
+#[test]
+fn implicit_scan_surfaces_unavailable_docker_and_succeeds() {
+    let ctx = TestContext::new();
+    ctx.create_mock_command(
+        "docker",
+        r#"#!/bin/sh
+if [ "$1" = "info" ]; then
+  exit 1
+fi
+"#,
+    );
+
+    ctx.cli()
+        .arg("scan")
+        .arg(ctx.home())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Docker"))
+        .stdout(predicate::str::contains("unavailable"))
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
+fn explicit_all_scan_fails_when_docker_is_unavailable() {
+    let ctx = TestContext::new();
+    ctx.create_mock_command(
+        "docker",
+        r#"#!/bin/sh
+if [ "$1" = "info" ]; then
+  exit 1
+fi
+"#,
+    );
+
+    ctx.cli()
+        .arg("scan")
+        .arg("--all")
+        .arg(ctx.home())
+        .assert()
+        .failure()
+        .code(1)
+        .stdout(predicate::str::contains("Docker"))
+        .stdout(predicate::str::contains("unavailable"))
+        .stderr(predicate::str::contains("Docker is unavailable"));
+}

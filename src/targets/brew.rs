@@ -6,7 +6,7 @@ use dirs_next as dirs;
 use crate::error::AppError;
 
 use super::category::Category;
-use super::item::{CleanupItem, PathAuthority};
+use super::item::CleanupItem;
 use super::target::{CleanupTarget, DiscoveryOutcome, ScanScope};
 
 pub struct BrewTarget;

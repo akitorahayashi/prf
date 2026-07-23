@@ -107,19 +107,19 @@ pub fn validate_report(
         return Err(AppError::IncompleteScan(failures.join("; ")));
     }
 
-    if request_origin != RequestOrigin::Implicit {
-        if let Some((category, reason)) = categories.iter().find_map(|category| {
+    if request_origin != RequestOrigin::Implicit
+        && let Some((category, reason)) = categories.iter().find_map(|category| {
             let status = &report.report_for(*category)?.status;
             match status {
                 CategoryStatus::Unavailable(reason) => Some((*category, reason)),
                 _ => None,
             }
-        }) {
-            return Err(AppError::CategoryUnavailable {
-                category: category.display_name().to_string(),
-                reason: reason.clone(),
-            });
-        }
+        })
+    {
+        return Err(AppError::CategoryUnavailable {
+            category: category.display_name().to_string(),
+            reason: reason.clone(),
+        });
     }
 
     Ok(())

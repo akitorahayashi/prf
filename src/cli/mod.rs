@@ -31,7 +31,7 @@ enum Commands {
 pub fn run() {
     if let Err(err) = run_inner() {
         eprintln!("Error: {}", err);
-        std::process::exit(1);
+        std::process::exit(err.exit_code());
     }
 }
 

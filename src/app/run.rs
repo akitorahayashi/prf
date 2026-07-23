@@ -13,7 +13,7 @@ use crate::targets::catalog::RequestOrigin;
 use crate::targets::category::Category;
 use crate::targets::docker;
 use crate::targets::item::{CleanupAction, CleanupItem, ExternalAction};
-use crate::targets::report::{ScanReport, candidate_total_size};
+use crate::targets::report::candidate_total_size;
 use crate::targets::target::ScanScope;
 
 use super::scan::{scan_categories, validate_report};
@@ -154,4 +154,55 @@ fn execute_filesystem_items(
 
     progress_bar.finish_and_clear();
     executions
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::symlink;
+
+    use assert_fs::TempDir;
+    use assert_fs::prelude::*;
+
+    use super::*;
+    use crate::targets::item::{CleanupItem, PathAuthority};
+
+    fn scanned_item(path: &std::path::Path, root: &std::path::Path) -> CleanupItem {
+        CleanupItem::from_path(
+            Category::Nodejs,
+            std::fs::canonicalize(path).expect("candidate canonicalizes"),
+            PathAuthority::LocalRoot(std::fs::canonicalize(root).expect("root canonicalizes")),
+        )
+        .expect("candidate is scanned")
+    }
+
+    #[test]
+    fn filesystem_execution_observes_all_results_after_one_candidate_fails() {
+        let root = TempDir::new().expect("root is created");
+        let outside = TempDir::new().expect("outside root is created");
+        outside.child("preserved.txt").write_str("content").expect("outside file exists");
+
+        let replaced = root.child("first/node_modules");
+        replaced.create_dir_all().expect("first target exists");
+        let removable = root.child("second/node_modules");
+        removable.child("index.js").write_str("content").expect("second target exists");
+        let replaced_item = scanned_item(replaced.path(), root.path());
+        let removable_item = scanned_item(removable.path(), root.path());
+
+        std::fs::remove_dir(replaced.path()).expect("first target is removed");
+        symlink(outside.path(), replaced.path()).expect("replacement symlink exists");
+
+        let executions = execute_filesystem_items(
+            &[replaced_item, removable_item],
+            &Arc::new(MultiProgress::new()),
+        );
+
+        assert_eq!(executions.len(), 2);
+        assert_eq!(executions.iter().filter(|result| result.result.is_err()).count(), 1);
+        assert_eq!(
+            executions.iter().filter(|result| result.result == Ok(RemovalOutcome::Removed)).count(),
+            1
+        );
+        removable.assert(predicates::path::missing());
+        outside.child("preserved.txt").assert("content");
+    }
 }

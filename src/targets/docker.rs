@@ -1,4 +1,3 @@
-use std::io;
 use std::process::{Command, Stdio};
 
 use byte_unit::Byte;

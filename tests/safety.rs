@@ -43,3 +43,34 @@ fn run_without_confirmation_preserves_targets() {
 
     assert!(cache_dir.exists(), "cache directory should remain after rejected confirmation");
 }
+
+#[test]
+fn current_mode_rejects_external_category_as_usage_error() {
+    let ctx = TestContext::new();
+
+    ctx.cli()
+        .arg("scan")
+        .arg("--current")
+        .arg("--type")
+        .arg("docker")
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicate::str::contains("remove --current or select a local category"));
+}
+
+#[test]
+fn nonexistent_root_is_an_operational_error() {
+    let ctx = TestContext::new();
+    let missing = ctx.work_dir().join("missing");
+
+    ctx.cli()
+        .arg("scan")
+        .arg("--type")
+        .arg("python")
+        .arg(&missing)
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("Invalid scan root"));
+}
