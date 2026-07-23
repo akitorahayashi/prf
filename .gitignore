@@ -1,6 +1,6 @@
 /target
 .tmp/*
-reference/*
+references/**
 
 # Coverage
 coverage/*

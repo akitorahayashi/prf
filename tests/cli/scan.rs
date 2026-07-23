@@ -1,5 +1,9 @@
 use crate::harness::TestContext;
 use predicates::prelude::*;
+#[cfg(unix)]
+use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
 #[test]
 fn scan_python_verbose_lists_targets() {
@@ -123,4 +127,79 @@ exit 0
         .failure()
         .stderr(predicate::str::contains("Discovery failed"))
         .stderr(predicate::str::contains("not valid JSON"));
+}
+
+#[cfg(unix)]
+#[test]
+fn scan_list_does_not_measure_discovered_candidates() {
+    let ctx = TestContext::new();
+    let cache = ctx.create_home_dir("workspace/node_modules");
+    let mut permissions = fs::metadata(&cache).expect("cache metadata exists").permissions();
+    permissions.set_mode(0o000);
+    fs::set_permissions(&cache, permissions).expect("cache becomes unreadable");
+
+    if fs::read_dir(&cache).is_ok() {
+        let mut permissions = fs::metadata(&cache).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&cache, permissions).unwrap();
+        return;
+    }
+
+    let list = ctx
+        .cli()
+        .arg("scan")
+        .arg("--list")
+        .arg("--type")
+        .arg("nodejs")
+        .arg(ctx.home())
+        .output()
+        .expect("list command runs");
+    let scan = ctx
+        .cli()
+        .arg("scan")
+        .arg("--type")
+        .arg("nodejs")
+        .arg(ctx.home())
+        .output()
+        .expect("scan command runs");
+
+    let mut permissions = fs::metadata(&cache).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&cache, permissions).expect("cache permissions are restored");
+
+    assert!(list.status.success(), "list stderr: {}", String::from_utf8_lossy(&list.stderr));
+    assert!(!scan.status.success(), "scan unexpectedly succeeded");
+    assert!(
+        String::from_utf8_lossy(&scan.stderr).contains("Footprint estimation failed"),
+        "scan stderr: {}",
+        String::from_utf8_lossy(&scan.stderr)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn scan_reports_allocated_footprint_for_sparse_files() {
+    use std::fs::File;
+
+    let ctx = TestContext::new();
+    let cache = ctx.create_home_dir("workspace/node_modules");
+    let sparse = cache.join("sparse.bin");
+    File::create(&sparse)
+        .expect("sparse file is created")
+        .set_len(1024 * 1024 * 1024)
+        .expect("logical length is set");
+    let allocated = fs::metadata(&cache).unwrap().blocks() * 512
+        + fs::metadata(&sparse).unwrap().blocks() * 512;
+    let expected = prf::output::bytes::format_bytes(allocated);
+
+    ctx.cli()
+        .arg("scan")
+        .arg("--type")
+        .arg("nodejs")
+        .arg("--verbose")
+        .arg(ctx.home())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(expected))
+        .stdout(predicate::str::contains("1.07 GB").not());
 }

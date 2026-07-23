@@ -36,21 +36,21 @@ pub fn print_scan_report(report: &ScanReport, targets: &[&Target], verbose: bool
             println!(
                 "- {:<8} {:>10} across {} item(s)",
                 target.display_name(),
-                format_bytes(target_report.total_size()),
+                format_bytes(target_report.estimate().bytes()),
                 target_report.candidates.len()
             );
             if verbose {
-                for candidate in &target_report.candidates {
+                for candidate_report in &target_report.candidates {
                     println!(
                         "    • {:<60} {}",
-                        candidate_display(&candidate.action),
-                        format_bytes(candidate.estimated_size())
+                        candidate_display(&candidate_report.candidate.action),
+                        format_bytes(candidate_report.estimate().bytes())
                     );
                 }
             }
         }
     }
-    println!("Total reclaimable: {}", format_bytes(report.total_size()));
+    println!("Total reclaimable: {}", format_bytes(report.estimate().bytes()));
 }
 
 pub fn print_list_results(targets: &[&Target], inspections: &[Inspection]) {
@@ -84,21 +84,21 @@ pub fn print_deletion_plan(report: &ScanReport, targets: &[&Target], verbose: bo
             println!(
                 "- {:<8} {:>10} across {} item(s)",
                 target.display_name(),
-                format_bytes(target_report.total_size()),
+                format_bytes(target_report.estimate().bytes()),
                 target_report.candidates.len()
             );
-            for candidate in &target_report.candidates {
+            for candidate_report in &target_report.candidates {
                 if verbose {
                     println!(
                         "    • {:<60} {}",
-                        candidate_display(&candidate.action),
-                        format_bytes(candidate.estimated_size())
+                        candidate_display(&candidate_report.candidate.action),
+                        format_bytes(candidate_report.estimate().bytes())
                     );
                 } else {
-                    println!("    • {}", candidate_display(&candidate.action));
+                    println!("    • {}", candidate_display(&candidate_report.candidate.action));
                 }
             }
         }
     }
-    println!("Total to delete: {}", format_bytes(report.total_size()));
+    println!("Total to delete: {}", format_bytes(report.estimate().bytes()));
 }

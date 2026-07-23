@@ -47,7 +47,7 @@ prf scan --type python -v       # Show detailed Python cleanup targets
 
 ### Safety Model
 
-1. Scans report reclaimable size per target.
+1. Scans report estimated reclaimable allocated disk space per target.
 2. `--type <target>`, `--all`, and interactive selection constrain deletion scope.
 3. Destructive actions require confirmation unless `-y/--yes` is supplied.
 
@@ -58,8 +58,9 @@ The implementation follows explicit boundaries:
 - `src/cli/` parses CLI arguments and converts them into app options.
 - `src/app/` orchestrates scan and run use cases.
 - `src/cleanup/` owns discovery contracts, cleanup candidates, action application, and reports.
+- `src/footprint/` owns allocated-space measurement and selection-aware estimates.
 - `src/targets/` declares supported targets and owns target-specific inspection.
-- `src/fs/` owns root resolution, size measurement, and filesystem deletion.
+- `src/fs/` owns root resolution and filesystem deletion.
 - `src/output/` owns terminal rendering, progress styles, and prompts.
 
 ## Documentation

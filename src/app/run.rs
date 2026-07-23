@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use indicatif::{MultiProgress, ProgressBar};
 
-use crate::cleanup::{Scope, Target, apply_candidates};
+use crate::cleanup::{Scope, Target, apply_plan};
 use crate::error::AppError;
 use crate::output::messages;
 use crate::output::progress::deletion_progress_style;
@@ -44,23 +44,24 @@ pub fn execute(options: RunOptions) -> Result<(), AppError> {
         options.targets.clone()
     };
 
-    let subset = report.subset(&selected_targets);
+    let subset = report.subset(&selected_targets)?;
     if subset.is_empty() {
         println!("{}", messages::nothing_to_delete());
         return Ok(());
     }
 
     print_deletion_plan(&subset, &selected_targets, options.verbose);
-    if !options.assume_yes && !confirm_deletion(subset.total_size())? {
+    if !options.assume_yes && !confirm_deletion(subset.estimate().bytes())? {
         println!("{}", messages::aborted());
         return Ok(());
     }
 
-    let candidates = subset.candidates_for(&selected_targets);
+    let plan = subset.removal_plan();
     let deletion_bar = progress.add(ProgressBar::new(0));
     deletion_bar.set_style(deletion_progress_style());
-    let result = apply_candidates(
-        &candidates,
+    let result = apply_plan(
+        plan,
+        subset.footprint(),
         |count| deletion_bar.set_length(count as u64),
         || deletion_bar.inc(1),
     );
@@ -71,7 +72,7 @@ pub fn execute(options: RunOptions) -> Result<(), AppError> {
     println!(
         "{}",
         messages::deletion_summary(
-            summary.freed_estimate,
+            summary.freed_estimate.bytes(),
             summary.applied,
             summary.failed,
             subset.target_ids().len(),
