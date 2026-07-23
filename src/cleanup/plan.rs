@@ -259,7 +259,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn plan_merges_canonical_aliases_and_omits_descendants() {
+    fn plan_merges_duplicates_and_canonical_aliases_and_omits_descendants() {
         use std::os::unix::fs::symlink;
 
         let temp = TempDir::new().expect("temp directory is created");
@@ -270,16 +270,17 @@ mod tests {
         symlink(parent.path(), alias.path()).expect("alias exists");
         let candidates = vec![
             Candidate::directory(TARGET, parent.path().to_path_buf()),
+            Candidate::directory(TARGET, parent.path().to_path_buf()),
             Candidate::directory(TARGET, alias.path().to_path_buf()),
             Candidate::directory(TARGET, child.path().to_path_buf()),
         ];
         let catalog = RemovalCatalog::new(&candidates).expect("catalog is valid");
 
-        let plan = catalog.plan(&candidates, &[0, 1, 2]).expect("plan is built");
+        let plan = catalog.plan(&candidates, &[0, 1, 2, 3]).expect("plan is built");
 
         assert_eq!(plan.paths().len(), 1);
         assert_eq!(plan.paths()[0].path(), parent.path().canonicalize().unwrap());
-        assert_eq!(plan.paths()[0].candidates(), &[0, 1, 2]);
+        assert_eq!(plan.paths()[0].candidates(), &[0, 1, 2, 3]);
     }
 
     #[test]
