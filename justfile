@@ -36,6 +36,7 @@ coverage:
         --out Html \
         --output-dir coverage \
         --all-features \
+        --include-files 'src/**' \
         --fail-under 80
 
 build:
