@@ -9,7 +9,7 @@ use crate::cleanup::{Inspection, RemovalCatalog, ScanReport, Scope, Target};
 use crate::error::AppError;
 use crate::footprint::Index;
 use crate::output::messages;
-use crate::output::progress::{discovery_spinner_style, footprint_progress_style};
+use crate::output::progress::{discovery_spinner_style, footprint_spinner_style};
 use crate::output::report::{print_diagnostics, print_list_results, print_scan_report};
 
 pub struct ScanOptions {
@@ -76,13 +76,18 @@ pub fn scan_targets(
     }
 
     let total_items = candidates.len();
-    let size_bar = progress.add(ProgressBar::new(total_items as u64));
-    size_bar.set_style(footprint_progress_style());
-    let catalog = RemovalCatalog::new(&candidates)?;
-    let footprint = Index::measure(&catalog.measurement_roots())?;
-    size_bar.inc(total_items as u64);
-    size_bar.finish_and_clear();
+    let footprint_spinner = progress.add(ProgressBar::new_spinner());
+    footprint_spinner.set_style(footprint_spinner_style());
+    footprint_spinner.enable_steady_tick(Duration::from_millis(100));
+    footprint_spinner.set_message(messages::calculating_footprint(total_items));
+    let measurement = (|| {
+        let catalog = RemovalCatalog::new(candidates)?;
+        let footprint = Index::measure(&catalog.measurement_roots())?;
+        Ok::<_, AppError>((catalog, footprint))
+    })();
+    footprint_spinner.finish_and_clear();
+    let (catalog, footprint) = measurement?;
     let _ = progress.println(messages::footprint_calculation_complete(total_items));
 
-    ScanReport::build(candidates, catalog, footprint, targets)
+    ScanReport::build(catalog, footprint, targets)
 }

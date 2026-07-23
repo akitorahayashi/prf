@@ -16,17 +16,18 @@ struct CatalogRoot {
 
 #[derive(Debug, Clone, Default)]
 pub struct RemovalCatalog {
+    candidates: Vec<Candidate>,
     roots: Vec<CatalogRoot>,
     candidate_roots: Vec<Option<RootId>>,
 }
 
 impl RemovalCatalog {
-    pub fn new(candidates: &[Candidate]) -> Result<Self, AppError> {
+    pub fn new(candidates: Vec<Candidate>) -> Result<Self, AppError> {
         let mut roots: Vec<CatalogRoot> = Vec::new();
         let mut roots_by_path: HashMap<PathBuf, usize> = HashMap::new();
         let mut candidate_roots = Vec::with_capacity(candidates.len());
 
-        for candidate in candidates {
+        for candidate in &candidates {
             match (&candidate.action, candidate.basis()) {
                 (Action::RemovePath { path, kind }, Basis::Allocated) => {
                     let resolved = match std::fs::canonicalize(path) {
@@ -61,22 +62,22 @@ impl RemovalCatalog {
             }
         }
 
-        Ok(Self { roots, candidate_roots })
+        Ok(Self { candidates, roots, candidate_roots })
+    }
+
+    pub fn candidates(&self) -> &[Candidate] {
+        &self.candidates
     }
 
     pub fn measurement_roots(&self) -> Vec<Root> {
         self.roots.iter().map(|root| Root::new(root.id, root.path.clone())).collect()
     }
 
-    pub fn plan(
-        &self,
-        candidates: &[Candidate],
-        selected: &[usize],
-    ) -> Result<RemovalPlan, AppError> {
+    pub fn plan(&self, selected: &[usize]) -> Result<RemovalPlan, AppError> {
         let mut selected = selected.to_vec();
         selected.sort_unstable();
         selected.dedup();
-        if selected.iter().any(|index| *index >= candidates.len()) {
+        if selected.iter().any(|index| *index >= self.candidates.len()) {
             return Err(AppError::Cleanup(
                 "removal plan references an unknown candidate".to_string(),
             ));
@@ -129,7 +130,7 @@ impl RemovalCatalog {
 
         let mut processes = Vec::new();
         for index in selected {
-            let candidate = &candidates[index];
+            let candidate = &self.candidates[index];
             match (&candidate.action, candidate.basis()) {
                 (Action::RunProcess { label, program, args }, Basis::Reported(estimate)) => {
                     processes.push(ProcessRemoval {
@@ -274,9 +275,9 @@ mod tests {
             Candidate::directory(TARGET, alias.path().to_path_buf()),
             Candidate::directory(TARGET, child.path().to_path_buf()),
         ];
-        let catalog = RemovalCatalog::new(&candidates).expect("catalog is valid");
+        let catalog = RemovalCatalog::new(candidates).expect("catalog is valid");
 
-        let plan = catalog.plan(&candidates, &[0, 1, 2, 3]).expect("plan is built");
+        let plan = catalog.plan(&[0, 1, 2, 3]).expect("plan is built");
 
         assert_eq!(plan.paths().len(), 1);
         assert_eq!(plan.paths()[0].path(), parent.path().canonicalize().unwrap());
@@ -294,7 +295,7 @@ mod tests {
         ];
 
         assert!(matches!(
-            RemovalCatalog::new(&candidates),
+            RemovalCatalog::new(candidates),
             Err(AppError::Cleanup(message)) if message.contains("conflicting entry kinds")
         ));
     }
@@ -304,10 +305,21 @@ mod tests {
         let temp = TempDir::new().expect("temp directory is created");
         let missing = temp.path().join("missing");
         let candidates = vec![Candidate::directory(TARGET, missing.clone())];
-        let catalog = RemovalCatalog::new(&candidates).expect("catalog is valid");
+        let catalog = RemovalCatalog::new(candidates).expect("catalog is valid");
 
-        let plan = catalog.plan(&candidates, &[0]).expect("plan is built");
+        let plan = catalog.plan(&[0]).expect("plan is built");
 
         assert_eq!(plan.paths()[0].path(), missing);
+    }
+
+    #[test]
+    fn plan_rejects_an_unknown_candidate_index() {
+        let catalog = RemovalCatalog::default();
+
+        assert!(matches!(
+            catalog.plan(&[0]),
+            Err(AppError::Cleanup(message))
+                if message.contains("references an unknown candidate")
+        ));
     }
 }

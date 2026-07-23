@@ -163,11 +163,11 @@ mod tests {
     const TARGET: TargetId = TargetId::new("test");
 
     fn prepare(candidates: &[Candidate]) -> (RemovalPlan, Index) {
-        let catalog = RemovalCatalog::new(candidates).expect("catalog is valid");
+        let catalog = RemovalCatalog::new(candidates.to_vec()).expect("catalog is valid");
         let footprint =
             Index::measure(&catalog.measurement_roots()).expect("footprint is measured");
         let selected = (0..candidates.len()).collect::<Vec<_>>();
-        let plan = catalog.plan(candidates, &selected).expect("plan is built");
+        let plan = catalog.plan(&selected).expect("plan is built");
         (plan, footprint)
     }
 

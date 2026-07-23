@@ -6,7 +6,7 @@
   discovery contract.
 - Candidate: A concrete, scanned cleanup action with an allocated or externally reported footprint
   basis.
-- Removal Catalog: Canonical physical roots and ownership retained for all scanned candidates.
+- Removal Catalog: The owned scanned candidates, canonical physical roots, and their association.
 - Scan Report: Target-grouped candidates plus the footprint data required for later subsets.
 - Removal Plan: A user-selected, non-overlapping subset shared by footprint aggregation and action
   application.
@@ -108,9 +108,11 @@ no target-specific execution branches.
 
 ## Removal Planning
 
-The removal catalog canonicalizes existing candidate paths after discovery, merges physical aliases,
-rejects conflicting entry kinds, and retains original paths for output. A removal plan selects
-catalog roots for a report subset and omits roots already covered by a selected ancestor.
+The removal catalog owns the scanned candidate set, canonicalizes existing paths after discovery,
+merges physical aliases, rejects conflicting entry kinds, and retains original paths for output. A
+removal plan selects catalog roots for a report subset and omits roots already covered by a selected
+ancestor. Plan construction accepts only candidate indices, so a different candidate collection
+cannot be paired with catalog normalization state.
 
 Footprint measurement and action application consume the same physical roots. A symbolic-link
 candidate therefore resolves once to the target used by both stages, while symbolic links found

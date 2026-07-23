@@ -35,7 +35,7 @@ coverage:
         --out Html \
         --output-dir coverage \
         --all-features \
-        --exclude-files 'references/*' \
+        --exclude-files 'references/**' \
         --fail-under 80
 
 build:

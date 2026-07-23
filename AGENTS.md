@@ -27,7 +27,7 @@ src/
     discovery.rs   Standard discovery rules, inspections, diagnostics, and listings
     candidate.rs   Concrete actions and their footprint measurement basis
     action.rs      Filesystem and process action vocabulary
-    plan.rs        Canonical removal roots shared by estimation and application
+    plan.rs        Scanned candidates and canonical roots shared by estimation and application
     report.rs      Target-grouped scan reports and selected subsets
     apply.rs       Removal-plan execution and successful-action summaries
   footprint/
@@ -75,8 +75,8 @@ The local task surface is:
 
 `cli` resolves targets and roots, then `app::scan::scan_targets()` inspects selected targets in
 parallel. Each `Inspection` can contain candidates, list-only information, and non-fatal
-diagnostics. A `RemovalCatalog` canonicalizes candidate paths, and one footprint index measures its
-maximal physical roots before candidates enter a `ScanReport`.
+diagnostics. A `RemovalCatalog` owns the scanned candidates and canonicalizes their paths, and one
+footprint index measures its maximal physical roots before candidates enter a `ScanReport`.
 
 `run` always uses this same scan flow. Interactive target selection produces a subset of the report,
 confirmation approves that subset, and `apply_plan()` receives the subset's canonical
@@ -159,7 +159,7 @@ confirmation remains required unless `-y/--yes` is supplied.
 - `Scope` - resolved recursive roots and the current-mode flag.
 - `Inspection` - candidates, list results, and diagnostics from one target.
 - `Candidate` - a target-attributed `Action` with an allocated or reported footprint basis.
-- `RemovalCatalog` - canonical physical roots and candidate-to-root ownership.
+- `RemovalCatalog` - the owned scanned candidates, canonical physical roots, and their association.
 - `RemovalPlan` - a selected, non-overlapping subset shared by estimation and application.
 - `Estimate` - a checked byte amount produced from allocated or externally reported data.
 - `Index` - selection-aware allocation totals and multi-link inode observations.

@@ -39,7 +39,6 @@ impl TargetReport {
 
 #[derive(Debug, Clone)]
 pub struct ScanReport {
-    candidates: Arc<Vec<Candidate>>,
     catalog: Arc<RemovalCatalog>,
     footprint: Arc<Index>,
     reports: BTreeMap<TargetId, TargetReport>,
@@ -50,7 +49,6 @@ pub struct ScanReport {
 impl ScanReport {
     pub fn empty() -> Self {
         Self {
-            candidates: Arc::new(Vec::new()),
             catalog: Arc::new(RemovalCatalog::default()),
             footprint: Arc::new(Index::default()),
             reports: BTreeMap::new(),
@@ -60,24 +58,22 @@ impl ScanReport {
     }
 
     pub fn build(
-        candidates: Vec<Candidate>,
         catalog: RemovalCatalog,
         footprint: Index,
         targets: &[&Target],
     ) -> Result<Self, AppError> {
-        let candidates = Arc::new(candidates);
         let catalog = Arc::new(catalog);
         let footprint = Arc::new(footprint);
         let target_ids = targets.iter().map(|target| target.id()).collect::<Vec<_>>();
-        Self::view(candidates, catalog, footprint, &target_ids)
+        Self::view(catalog, footprint, &target_ids)
     }
 
     fn view(
-        candidates: Arc<Vec<Candidate>>,
         catalog: Arc<RemovalCatalog>,
         footprint: Arc<Index>,
         targets: &[TargetId],
     ) -> Result<Self, AppError> {
+        let candidates = catalog.candidates();
         let selected_targets = targets.iter().copied().collect::<HashSet<_>>();
         let selected = candidates
             .iter()
@@ -86,7 +82,7 @@ impl ScanReport {
                 selected_targets.contains(&candidate.target).then_some(index)
             })
             .collect::<Vec<_>>();
-        let plan = catalog.plan(&candidates, &selected)?;
+        let plan = catalog.plan(&selected)?;
         let breakdown = footprint.breakdown(plan.roots(), plan.reported())?;
         let mut estimates = Contributions::new(&selected);
         for path in plan.paths() {
@@ -124,7 +120,7 @@ impl ScanReport {
             );
         }
 
-        Ok(Self { candidates, catalog, footprint, reports, plan, estimate: breakdown.total() })
+        Ok(Self { catalog, footprint, reports, plan, estimate: breakdown.total() })
     }
 
     pub const fn estimate(&self) -> Estimate {
@@ -141,23 +137,19 @@ impl ScanReport {
 
     pub fn subset(&self, targets: &[&Target]) -> Result<Self, AppError> {
         let target_ids = targets.iter().map(|target| target.id()).collect::<Vec<_>>();
-        Self::view(
-            Arc::clone(&self.candidates),
-            Arc::clone(&self.catalog),
-            Arc::clone(&self.footprint),
-            &target_ids,
-        )
+        Self::view(Arc::clone(&self.catalog), Arc::clone(&self.footprint), &target_ids)
     }
 
     pub fn estimate_for(&self, targets: &[TargetId]) -> Result<Estimate, AppError> {
         let targets = targets.iter().copied().collect::<HashSet<_>>();
         let selected = self
-            .candidates
+            .catalog
+            .candidates()
             .iter()
             .enumerate()
             .filter_map(|(index, candidate)| targets.contains(&candidate.target).then_some(index))
             .collect::<Vec<_>>();
-        let plan = self.catalog.plan(&self.candidates, &selected)?;
+        let plan = self.catalog.plan(&selected)?;
         Ok(self.footprint.breakdown(plan.roots(), plan.reported())?.total())
     }
 
@@ -221,10 +213,10 @@ mod tests {
         Target::new(SECOND, "Second", ScopeSupport::AllModes, Discovery::Inspector(no_inspection));
 
     fn build(candidates: Vec<Candidate>) -> ScanReport {
-        let catalog = RemovalCatalog::new(&candidates).expect("catalog is valid");
+        let catalog = RemovalCatalog::new(candidates).expect("catalog is valid");
         let footprint =
             Index::measure(&catalog.measurement_roots()).expect("footprint is measured");
-        ScanReport::build(candidates, catalog, footprint, &[&FIRST_TARGET, &SECOND_TARGET])
+        ScanReport::build(catalog, footprint, &[&FIRST_TARGET, &SECOND_TARGET])
             .expect("report is built")
     }
 
@@ -280,13 +272,13 @@ mod tests {
         let root = temp.child("cache");
         root.create_dir_all().expect("root exists");
         let candidates = vec![Candidate::directory(FIRST, root.path().to_path_buf())];
-        let catalog = RemovalCatalog::new(&candidates).expect("catalog is valid");
+        let catalog = RemovalCatalog::new(candidates).expect("catalog is valid");
         fs::remove_dir(root.path()).expect("root disappears before measurement");
         let footprint =
             Index::measure(&catalog.measurement_roots()).expect("missing root is tolerated");
 
-        let report = ScanReport::build(candidates, catalog, footprint, &[&FIRST_TARGET])
-            .expect("report is built");
+        let report =
+            ScanReport::build(catalog, footprint, &[&FIRST_TARGET]).expect("report is built");
 
         assert_eq!(report.estimate(), Estimate::ZERO);
     }
