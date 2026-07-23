@@ -1,3 +1,5 @@
+use std::io::{self, Write};
+
 use clap::{Parser, Subcommand};
 
 use crate::app;
@@ -29,8 +31,14 @@ enum Commands {
 }
 
 pub fn execute() {
-    if let Err(err) = try_execute() {
-        eprintln!("Error: {}", err);
+    if let Err(error) = try_execute() {
+        if matches!(&error, AppError::Io(source) if source.kind() == io::ErrorKind::BrokenPipe) {
+            return;
+        }
+        let write_result = writeln!(io::stderr().lock(), "Error: {error}");
+        if write_result.is_err_and(|source| source.kind() != io::ErrorKind::BrokenPipe) {
+            std::process::exit(1);
+        }
         std::process::exit(1);
     }
 }

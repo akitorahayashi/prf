@@ -23,7 +23,7 @@ pub fn execute(options: ScanOptions) -> Result<ScanReport, AppError> {
     let scope = Scope::new(options.roots, options.current);
     let progress = Arc::new(MultiProgress::new());
     let report = scan_targets(&options.targets, &scope, &progress)?;
-    print_scan_report(&report, &options.targets, options.verbose);
+    print_scan_report(&report, &options.targets, options.verbose)?;
     Ok(report)
 }
 
@@ -33,8 +33,8 @@ pub fn list_targets(options: ScanOptions) -> Result<(), AppError> {
         options.targets.par_iter().map(|target| target.inspect(&scope)).collect();
     let inspections = inspections?;
 
-    print_diagnostics(&inspections);
-    print_list_results(&options.targets, &inspections);
+    print_diagnostics(&inspections)?;
+    print_list_results(&options.targets, &inspections)?;
     Ok(())
 }
 
@@ -58,17 +58,19 @@ pub fn scan_targets(
             spinner.set_message(messages::discovering(target.display_name()));
 
             let inspection = target.inspect(scope);
-            let count =
-                inspection.as_ref().map(|result| result.candidates.len()).unwrap_or_default();
             spinner.finish_and_clear();
-            let _ = discovery_progress
-                .println(messages::discovery_complete(target.display_name(), count));
+            if let Ok(result) = &inspection {
+                discovery_progress.println(messages::discovery_complete(
+                    target.display_name(),
+                    result.candidates.len(),
+                ))?;
+            }
             inspection
         })
         .collect();
     let inspections = inspections?;
 
-    print_diagnostics(&inspections);
+    print_diagnostics(&inspections)?;
     let candidates =
         inspections.into_iter().flat_map(|inspection| inspection.candidates).collect::<Vec<_>>();
     if candidates.is_empty() {
@@ -87,7 +89,7 @@ pub fn scan_targets(
     })();
     footprint_spinner.finish_and_clear();
     let (catalog, footprint) = measurement?;
-    let _ = progress.println(messages::footprint_calculation_complete(total_items));
+    progress.println(messages::footprint_calculation_complete(total_items))?;
 
     ScanReport::build(catalog, footprint, targets)
 }

@@ -114,15 +114,17 @@ and stops descending once a matching removable directory is found. A target uses
 
 A `RemovalCatalog` canonicalizes existing paths and merges aliases after discovery. A selected
 `RemovalPlan` omits descendants of another selected root while retaining candidate and target
-ownership. Canonicalization means a candidate that is a symbolic link resolves to its target before
-measurement and removal; the physical path can therefore differ from the path rendered during
-scanning. Within a traversed directory, files and symbolic links are removed before directories,
-deepest directories are attempted first, vanished paths are idempotent, and directories that become
-non-empty remain in place and are reported as failed.
+ownership. Parent paths are canonicalized without following a candidate's terminal symbolic link,
+so measurement, confirmation, and removal refer to the same entry. Within a traversed directory,
+files and symbolic links are removed before directories, deepest directories are attempted first,
+vanished paths are idempotent, and directories that become non-empty remain in place and are
+reported as retained.
 
 Path removals run in parallel before process actions. Application is not transactional: an error
-can be returned after other selected paths have already been removed, and no rollback occurs.
-Process actions run without a shell and surface startup or non-zero-exit failures.
+can follow other successful mutations, and no rollback occurs. Removed, already-absent, retained,
+and failed outcomes remain available for the final report. Retained or failed actions produce a
+non-zero command result after the partial report is rendered. Process actions run without a shell
+and surface startup or non-zero-exit failures.
 
 ### Footprint Model
 
@@ -165,13 +167,14 @@ confirmation remains required unless `-y/--yes` is supplied.
 - `Index` - selection-aware allocation totals and multi-link inode observations.
 - `ScanReport` - candidates and footprint data grouped by `TargetId`, and the authority for run
   subsets.
-- `ApplySummary` - applied count, failed count, and estimated reclaimed bytes.
+- `ApplyReport` - per-action outcomes and the estimate reclaimed by completed actions.
 - `AppError` - the typed CLI-wide error model used across discovery, cleanup, I/O, and selection.
 
 ## Safety Invariants
 
 - Scanning and `scan --list` perform no cleanup actions.
 - Every applied action originates in the confirmed subset of the immediately preceding scan report.
+- A terminal symbolic-link candidate removes only the link entry and never follows its target.
 - Destructive execution requires confirmation unless `-y/--yes` is present.
 - Current mode cannot select default-only targets or evaluate global home-relative rules.
 - Missing roots and unavailable optional tools are visible diagnostics; failed commands, malformed

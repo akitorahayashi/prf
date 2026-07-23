@@ -99,8 +99,9 @@ output are errors rather than empty successful scans.
 ## Action Model
 
 `RemovePath` and `RunProcess` form the finite action vocabulary. Each candidate also declares whether
-its footprint is allocated storage or an externally reported estimate. Action application is
-exhaustive in the cleanup domain and delegates low-level filesystem operations to `src/fs/`.
+its footprint is allocated storage or an externally reported estimate. Files, directories, and
+terminal symbolic links are distinct removal entry kinds. Action application is exhaustive in the
+cleanup domain and delegates low-level filesystem operations to `src/fs/`.
 Process actions use an executable and separated argument vector without a shell.
 
 Every applied action originates from the selected scan report. Application and output code contain
@@ -108,16 +109,20 @@ no target-specific execution branches.
 
 ## Removal Planning
 
-The removal catalog owns the scanned candidate set, canonicalizes existing paths after discovery,
-merges physical aliases, rejects conflicting entry kinds, and retains original paths for output. A
-removal plan selects catalog roots for a report subset and omits roots already covered by a selected
-ancestor. Plan construction accepts only candidate indices, so a different candidate collection
-cannot be paired with catalog normalization state.
+The removal catalog owns the scanned candidate set, canonicalizes candidate parents after discovery,
+merges physical ancestor aliases, rejects conflicting entry kinds, and retains the terminal path
+component. A removal plan selects catalog roots for a report subset and omits roots already covered
+by a selected ancestor. Plan construction accepts only candidate indices, so a different candidate
+collection cannot be paired with catalog normalization state.
 
-Footprint measurement and action application consume the same physical roots. A symbolic-link
-candidate therefore resolves once to the target used by both stages, while symbolic links found
-inside a removal directory are measured and removed without following them. A missing path remains
-an idempotent plan root with a zero footprint.
+Footprint measurement and action application consume the same normalized entries. A terminal
+symbolic-link candidate contributes and removes only the link entry; its target is never traversed.
+Symbolic links found inside a removal directory follow the same non-following rule. A missing path
+remains an idempotent plan root with a zero footprint.
+
+Application records removed, already-absent, retained, and failed outcomes without discarding
+successful mutations when another action fails. Reclaimed estimates include only completed actions.
+The outcome report is rendered before retained or failed actions cause a non-zero command result.
 
 ## Footprint Model
 

@@ -6,15 +6,37 @@ use walkdir::WalkDir;
 
 use crate::error::AppError;
 
-pub fn remove_file(path: &Path) -> Result<(), AppError> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemovalStatus {
+    Removed,
+    AlreadyAbsent,
+    Retained,
+}
+
+pub fn remove_file(path: &Path) -> Result<RemovalStatus, AppError> {
     match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(AppError::Io(err)),
+        Ok(()) => Ok(RemovalStatus::Removed),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(RemovalStatus::AlreadyAbsent),
+        Err(source) => Err(path_error("remove file or symbolic link", path, source)),
     }
 }
 
-pub fn safe_remove_dir_all(path: &Path) -> Result<(), AppError> {
+pub fn safe_remove_dir_all(path: &Path) -> Result<RemovalStatus, AppError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_dir() => {}
+        Ok(_) => {
+            return Err(path_error(
+                "inspect directory",
+                path,
+                io::Error::new(io::ErrorKind::InvalidInput, "entry is not a directory"),
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(RemovalStatus::AlreadyAbsent);
+        }
+        Err(source) => return Err(path_error("inspect directory", path, source)),
+    }
+
     let mut files_to_remove = Vec::new();
     let mut dirs_to_remove = Vec::new();
 
@@ -28,7 +50,14 @@ pub fn safe_remove_dir_all(path: &Path) -> Result<(), AppError> {
             {
                 continue;
             }
-            Err(error) => return Err(AppError::Io(io::Error::other(error))),
+            Err(error) => {
+                let failed_path = error.path().unwrap_or(path);
+                return Err(path_error(
+                    "traverse directory",
+                    failed_path,
+                    io::Error::other(error.to_string()),
+                ));
+            }
         };
 
         if entry.file_type().is_file() || entry.file_type().is_symlink() {
@@ -41,8 +70,8 @@ pub fn safe_remove_dir_all(path: &Path) -> Result<(), AppError> {
     for file in &files_to_remove {
         match fs::remove_file(file) {
             Ok(()) => {}
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-            Err(err) => return Err(AppError::Io(err)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(source) => return Err(path_error("remove file or symbolic link", file, source)),
         }
     }
 
@@ -50,11 +79,19 @@ pub fn safe_remove_dir_all(path: &Path) -> Result<(), AppError> {
     for (_, dir) in &dirs_to_remove {
         match fs::remove_dir(dir) {
             Ok(()) => {}
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-            Err(err) if err.kind() == io::ErrorKind::DirectoryNotEmpty => {}
-            Err(err) => return Err(AppError::Io(err)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) if error.kind() == io::ErrorKind::DirectoryNotEmpty => {}
+            Err(source) => return Err(path_error("remove directory", dir, source)),
         }
     }
 
-    Ok(())
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(RemovalStatus::Removed),
+        Ok(_) => Ok(RemovalStatus::Retained),
+        Err(source) => Err(path_error("inspect cleanup result", path, source)),
+    }
+}
+
+fn path_error(operation: &'static str, path: &Path, source: io::Error) -> AppError {
+    AppError::PathOperation { operation, path: path.to_path_buf(), source }
 }

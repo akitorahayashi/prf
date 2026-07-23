@@ -1,4 +1,6 @@
 use std::io;
+use std::path::PathBuf;
+use std::process::ExitStatus;
 
 use thiserror::Error;
 
@@ -25,6 +27,28 @@ pub enum AppError {
 
     #[error("Cleanup failed: {0}")]
     Cleanup(String),
+
+    #[error("Cannot {operation} '{}': {source}", path.display())]
+    PathOperation {
+        operation: &'static str,
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("Cannot start {label} with '{program}': {source}")]
+    ProcessStart {
+        label: &'static str,
+        program: &'static str,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("{label} failed with status {status} while running '{program}'")]
+    ProcessExit { label: &'static str, program: &'static str, status: ExitStatus },
+
+    #[error("Cleanup incomplete: {retained} retained, {failed} failed")]
+    IncompleteCleanup { retained: usize, failed: usize },
 
     #[error("Footprint estimation failed: {0}")]
     Footprint(#[from] crate::footprint::Error),

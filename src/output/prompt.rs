@@ -9,17 +9,21 @@ pub fn prompt_for_targets<'a>(
     report: &ScanReport,
     available_targets: &[&'a Target],
 ) -> Result<Vec<&'a Target>, AppError> {
-    println!(
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    writeln!(
+        output,
         "Select targets to delete (comma separated names or numbers). Type 'all' to select everything or press Enter to cancel."
-    );
+    )?;
 
     for (index, target) in available_targets.iter().enumerate() {
         let size = report.estimate_for(&[target.id()])?.bytes();
-        println!("  [{}] {:<8} {:>10}", index + 1, target, format_bytes(size));
+        writeln!(output, "  [{}] {:<8} {:>10}", index + 1, target, format_bytes(size))?;
     }
 
-    print!("Selection: ");
-    io::stdout().flush()?;
+    write!(output, "Selection: ")?;
+    output.flush()?;
+    drop(output);
 
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
@@ -82,9 +86,12 @@ fn push_unique<'a>(selected: &mut Vec<&'a Target>, target: &'a Target) {
 }
 
 pub fn confirm_deletion(total_size: u64) -> Result<bool, AppError> {
-    println!("About to delete {}. Proceed? [y/N]", format_bytes(total_size));
-    print!("Confirm: ");
-    io::stdout().flush()?;
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    writeln!(output, "About to delete {}. Proceed? [y/N]", format_bytes(total_size))?;
+    write!(output, "Confirm: ")?;
+    output.flush()?;
+    drop(output);
 
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;

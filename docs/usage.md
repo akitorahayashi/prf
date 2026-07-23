@@ -27,9 +27,10 @@ Target behavior:
 
 Filesystem scan values estimate allocated disk space released by the selected removal roots. Sparse
 files use allocated blocks, hard-linked files contribute only when every link is selected, and
-symbolic links inside a removal tree are not followed. Docker values remain estimates reported by
-Docker. APFS clones, snapshots, concurrent filesystem changes, and failed removals can make the
-eventual released space differ from the scan estimate.
+symbolic-link candidates and links inside a removal tree are never followed. Docker values remain
+estimates reported by Docker. APFS clones, snapshots, concurrent filesystem changes, and failed
+removals can make the eventual released space differ from the scan estimate. A cleanup with retained
+or failed actions renders its partial outcome and exits unsuccessfully.
 
 Help displays via:
 

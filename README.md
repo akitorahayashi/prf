@@ -50,6 +50,8 @@ prf scan --type python -v       # Show detailed Python cleanup targets
 1. Scans report estimated reclaimable allocated disk space per target.
 2. `--type <target>`, `--all`, and interactive selection constrain deletion scope.
 3. Destructive actions require confirmation unless `-y/--yes` is supplied.
+4. Symbolic-link cleanup removes the link entry without following its target.
+5. Partial cleanup reports completed, absent, retained, and failed actions before exiting non-zero.
 
 ## Architecture
 

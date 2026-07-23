@@ -29,6 +29,14 @@ impl Candidate {
         }
     }
 
+    pub fn symlink(target: TargetId, path: PathBuf) -> Self {
+        Self {
+            target,
+            action: Action::RemovePath { path, kind: EntryKind::Symlink },
+            basis: Basis::Allocated,
+        }
+    }
+
     pub fn process(
         target: TargetId,
         label: &'static str,

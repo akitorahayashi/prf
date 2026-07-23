@@ -126,6 +126,7 @@ exit 0
         .assert()
         .failure()
         .stderr(predicate::str::contains("Discovery failed"))
+        .stderr(predicate::str::contains("discovery complete").not())
         .stderr(predicate::str::contains("not valid JSON"));
 }
 

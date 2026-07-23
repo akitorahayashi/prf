@@ -30,11 +30,7 @@ impl RemovalCatalog {
         for candidate in &candidates {
             match (&candidate.action, candidate.basis()) {
                 (Action::RemovePath { path, kind }, Basis::Allocated) => {
-                    let resolved = match std::fs::canonicalize(path) {
-                        Ok(path) => path,
-                        Err(error) if error.kind() == ErrorKind::NotFound => path.clone(),
-                        Err(error) => return Err(AppError::Io(error)),
-                    };
+                    let resolved = normalize_terminal_entry(path)?;
 
                     if let Some(index) = roots_by_path.get(&resolved).copied() {
                         if roots[index].kind != *kind {
@@ -158,6 +154,25 @@ fn is_strict_descendant(child: &Path, ancestor: &Path) -> bool {
     child != ancestor && child.starts_with(ancestor)
 }
 
+fn normalize_terminal_entry(path: &Path) -> Result<PathBuf, AppError> {
+    let Some(name) = path.file_name() else {
+        return match std::fs::canonicalize(path) {
+            Ok(path) => Ok(path),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(path.to_path_buf()),
+            Err(error) => Err(AppError::Io(error)),
+        };
+    };
+    let Some(parent) = path.parent() else {
+        return Ok(path.to_path_buf());
+    };
+
+    match std::fs::canonicalize(parent) {
+        Ok(parent) => Ok(parent.join(name)),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(path.to_path_buf()),
+        Err(error) => Err(AppError::Io(error)),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PathRemoval {
     root: RootId,
@@ -260,7 +275,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn plan_merges_duplicates_and_canonical_aliases_and_omits_descendants() {
+    fn plan_merges_duplicates_and_ancestor_aliases_and_omits_descendants() {
         use std::os::unix::fs::symlink;
 
         let temp = TempDir::new().expect("temp directory is created");
@@ -272,7 +287,7 @@ mod tests {
         let candidates = vec![
             Candidate::directory(TARGET, parent.path().to_path_buf()),
             Candidate::directory(TARGET, parent.path().to_path_buf()),
-            Candidate::directory(TARGET, alias.path().to_path_buf()),
+            Candidate::directory(TARGET, alias.path().join("child")),
             Candidate::directory(TARGET, child.path().to_path_buf()),
         ];
         let catalog = RemovalCatalog::new(candidates).expect("catalog is valid");
@@ -282,6 +297,29 @@ mod tests {
         assert_eq!(plan.paths().len(), 1);
         assert_eq!(plan.paths()[0].path(), parent.path().canonicalize().unwrap());
         assert_eq!(plan.paths()[0].candidates(), &[0, 1, 2, 3]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_symlink_is_not_canonicalized_to_its_target() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new().expect("temp directory is created");
+        let outside = temp.child("outside");
+        outside.create_dir_all().expect("outside directory exists");
+        let link = temp.child("cache-link");
+        symlink(outside.path(), link.path()).expect("link exists");
+        let catalog =
+            RemovalCatalog::new(vec![Candidate::symlink(TARGET, link.path().to_path_buf())])
+                .expect("catalog is valid");
+
+        let plan = catalog.plan(&[0]).expect("plan is built");
+
+        assert_eq!(
+            plan.paths()[0].path(),
+            link.path().parent().unwrap().canonicalize().unwrap().join("cache-link")
+        );
+        assert_eq!(plan.paths()[0].kind(), EntryKind::Symlink);
     }
 
     #[test]
@@ -309,7 +347,10 @@ mod tests {
 
         let plan = catalog.plan(&[0]).expect("plan is built");
 
-        assert_eq!(plan.paths()[0].path(), missing);
+        assert_eq!(
+            plan.paths()[0].path(),
+            missing.parent().unwrap().canonicalize().unwrap().join("missing")
+        );
     }
 
     #[test]

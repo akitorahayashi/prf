@@ -1,4 +1,7 @@
 use std::collections::{BTreeMap, HashSet};
+use std::io::ErrorKind;
+#[cfg(test)]
+use std::path::Path;
 use std::path::PathBuf;
 
 use dirs_next as dirs;
@@ -141,7 +144,7 @@ fn inspect_roots(
             for (index, rule) in rules.iter().enumerate() {
                 match rule {
                     Rule::DirectoryNames { names, parent_marker } => {
-                        if !entry.file_type().is_dir() {
+                        if !entry.file_type().is_dir() && !entry.file_type().is_symlink() {
                             continue;
                         }
                         let name = entry.file_name().to_string_lossy();
@@ -159,7 +162,7 @@ fn inspect_roots(
 
                         let path = entry.path().to_path_buf();
                         if candidate_paths.insert(path.clone()) {
-                            inspection.candidates.push(Candidate::directory(target, path));
+                            add_classified_path(target, path, inspection);
                         }
                         *listing_counts.entry(name.into_owned()).or_default() += 1;
                         skip_current = true;
@@ -221,7 +224,7 @@ fn inspect_home_paths(
         saw_home_rule = true;
         for relative in paths {
             let path = home.join(relative);
-            if path.exists() {
+            if path.symlink_metadata().is_ok() {
                 inspection.listings.push(Listing::Path(path.clone()));
                 add_existing_path(target, path, inspection, candidate_paths);
             }
@@ -239,14 +242,48 @@ fn add_existing_path(
     inspection: &mut Inspection,
     candidate_paths: &mut HashSet<PathBuf>,
 ) {
-    if !path.exists() || !candidate_paths.insert(path.clone()) {
+    if !candidate_paths.insert(path.clone()) {
         return;
     }
 
-    if path.is_file() {
-        inspection.candidates.push(Candidate::file(target, path));
+    add_classified_path(target, path, inspection);
+}
+
+fn add_classified_path(target: TargetId, path: PathBuf, inspection: &mut Inspection) {
+    let metadata = match path.symlink_metadata() {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == ErrorKind::NotFound => return,
+        Err(error) => {
+            inspection.diagnostics.push(Diagnostic {
+                message: format!("Unable to classify cleanup entry {}: {error}", path.display()),
+            });
+            return;
+        }
+    };
+    let file_type = metadata.file_type();
+    let candidate = if file_type.is_symlink() {
+        Candidate::symlink(target, path)
+    } else if file_type.is_file() {
+        Candidate::file(target, path)
+    } else if file_type.is_dir() {
+        Candidate::directory(target, path)
     } else {
-        inspection.candidates.push(Candidate::directory(target, path));
+        inspection.diagnostics.push(Diagnostic {
+            message: format!(
+                "Unsupported cleanup entry type at {}; the entry was not selected",
+                path.display()
+            ),
+        });
+        return;
+    };
+    inspection.candidates.push(candidate);
+}
+
+#[cfg(test)]
+fn candidate_path(candidate: &Candidate) -> Option<&Path> {
+    match &candidate.action {
+        super::Action::RemovePath { path, .. } => Some(path),
+        super::Action::RunProcess { .. } => None,
     }
 }
 
@@ -257,21 +294,15 @@ mod tests {
     use assert_fs::TempDir;
     use assert_fs::prelude::*;
     use serial_test::serial;
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
 
     use super::*;
-    use crate::cleanup::Action;
-
+    use crate::cleanup::{Action, EntryKind};
     const TEST_TARGET: TargetId = TargetId::new("test");
 
     fn candidate_paths(inspection: &Inspection) -> Vec<PathBuf> {
-        inspection
-            .candidates
-            .iter()
-            .filter_map(|candidate| match &candidate.action {
-                Action::RemovePath { path, .. } => Some(path.clone()),
-                Action::RunProcess { .. } => None,
-            })
-            .collect()
+        inspection.candidates.iter().filter_map(candidate_path).map(Path::to_path_buf).collect()
     }
 
     #[test]
@@ -334,6 +365,61 @@ mod tests {
                 count: 1,
             }]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn marker_children_classify_file_directory_and_dangling_links_as_links() {
+        const RULES: &[Rule] = &[Rule::MarkerChildren {
+            marker: "Package.swift",
+            children: &["file-link", "directory-link", "dangling-link"],
+            listing: "SwiftPM links",
+        }];
+        let temp = TempDir::new().expect("temp directory is created");
+        let package = temp.child("package");
+        package.create_dir_all().expect("package exists");
+        package.child("Package.swift").write_str("// package").expect("manifest exists");
+        let file = temp.child("outside-file");
+        file.write_str("outside").expect("outside file exists");
+        let directory = temp.child("outside-directory");
+        directory.create_dir_all().expect("outside directory exists");
+        symlink(file.path(), package.path().join("file-link")).expect("file link exists");
+        symlink(directory.path(), package.path().join("directory-link"))
+            .expect("directory link exists");
+        symlink(temp.path().join("missing"), package.path().join("dangling-link"))
+            .expect("dangling link exists");
+
+        let scope = Scope::new(vec![temp.path().to_path_buf()], false);
+        let inspection = inspect_rules(TEST_TARGET, &scope, RULES).expect("inspection succeeds");
+
+        assert_eq!(inspection.candidates.len(), 3);
+        assert!(inspection.candidates.iter().all(|candidate| matches!(
+            candidate.action,
+            Action::RemovePath { kind: EntryKind::Symlink, .. }
+        )));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_name_rule_selects_a_link_without_descending_through_it() {
+        const RULES: &[Rule] =
+            &[Rule::DirectoryNames { names: &["node_modules"], parent_marker: None }];
+        let temp = TempDir::new().expect("temp directory is created");
+        let outside = temp.child("outside");
+        outside.child("nested/node_modules").create_dir_all().expect("outside tree exists");
+        let project = temp.child("project");
+        project.create_dir_all().expect("project exists");
+        let link = project.child("node_modules");
+        symlink(outside.path(), link.path()).expect("directory link exists");
+
+        let scope = Scope::new(vec![project.path().to_path_buf()], false);
+        let inspection = inspect_rules(TEST_TARGET, &scope, RULES).expect("inspection succeeds");
+
+        assert_eq!(inspection.candidates.len(), 1);
+        assert!(matches!(
+            inspection.candidates[0].action,
+            Action::RemovePath { kind: EntryKind::Symlink, .. }
+        ));
     }
 
     #[test]

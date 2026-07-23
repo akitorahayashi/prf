@@ -4,6 +4,7 @@ use std::path::PathBuf;
 pub enum EntryKind {
     File,
     Directory,
+    Symlink,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
