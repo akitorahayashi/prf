@@ -31,9 +31,13 @@ just setup
 ### Verify Commands
 
 ```bash
+just fix
 just check
 just test
 ```
+
+`just check` includes rustfmt, Clippy with warnings denied, justfile formatting, and pinned
+actionlint workflow validation.
 
 ### Coverage Command
 

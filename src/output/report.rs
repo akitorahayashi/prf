@@ -1,13 +1,18 @@
+use std::collections::HashSet;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use dirs_next as dirs;
-
-use crate::cleanup::{Action, Inspection, Listing, ScanReport, Target};
+use crate::cleanup::{
+    Action, ActionOutcome, ApplyReport, Inspection, Listing, PathStatus, ProcessStatus, ScanReport,
+    Target,
+};
+use crate::error::AppError;
 
 use super::bytes::format_bytes;
+use super::messages;
 
-pub fn display_path(path: &Path) -> String {
-    if let Some(stripped) = dirs::home_dir().and_then(|home| path.strip_prefix(&home).ok()) {
+pub fn display_path(path: &Path, home: Option<&Path>) -> String {
+    if let Some(stripped) = home.and_then(|home| path.strip_prefix(home).ok()) {
         let mut display = PathBuf::from("~");
         display.push(stripped);
         return display.display().to_string();
@@ -16,89 +21,173 @@ pub fn display_path(path: &Path) -> String {
     path.display().to_string()
 }
 
-fn candidate_display(action: &Action) -> String {
+fn candidate_display(action: &Action, home: Option<&Path>) -> String {
     match action {
-        Action::RemovePath { path, .. } => display_path(path),
+        Action::RemovePath { path, .. } => display_path(path, home),
         Action::RunProcess { label, .. } => (*label).to_string(),
     }
 }
 
-pub fn print_diagnostics(inspections: &[Inspection]) {
-    for diagnostic in inspections.iter().flat_map(|inspection| &inspection.diagnostics) {
-        eprintln!("Warning: {}", diagnostic.message);
-    }
+pub fn print_stdout_line(message: &str) -> Result<(), AppError> {
+    writeln!(io::stdout().lock(), "{message}")?;
+    Ok(())
 }
 
-pub fn print_scan_report(report: &ScanReport, targets: &[&Target], verbose: bool) {
-    println!("Scan results:");
+pub fn print_diagnostics(inspections: &[Inspection]) -> Result<(), AppError> {
+    let stderr = io::stderr();
+    let mut output = stderr.lock();
+    let mut rendered = HashSet::new();
+    for diagnostic in inspections.iter().flat_map(|inspection| &inspection.diagnostics) {
+        if rendered.insert(&diagnostic.message) {
+            writeln!(output, "Warning: {}", diagnostic.message)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn print_scan_report(
+    report: &ScanReport,
+    targets: &[&Target],
+    verbose: bool,
+    home: Option<&Path>,
+) -> Result<(), AppError> {
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    writeln!(output, "Scan results:")?;
     for target in targets {
         if let Some(target_report) = report.report_for(target.id()) {
-            println!(
+            writeln!(
+                output,
                 "- {:<8} {:>10} across {} item(s)",
                 target.display_name(),
                 format_bytes(target_report.estimate().bytes()),
                 target_report.candidates.len()
-            );
+            )?;
             if verbose {
                 for candidate_report in &target_report.candidates {
-                    println!(
+                    writeln!(
+                        output,
                         "    • {:<60} {}",
-                        candidate_display(&candidate_report.candidate.action),
+                        candidate_display(candidate_report.candidate.action(), home),
                         format_bytes(candidate_report.estimate().bytes())
-                    );
+                    )?;
                 }
             }
         }
     }
-    println!("Total reclaimable: {}", format_bytes(report.estimate().bytes()));
+    writeln!(output, "Total reclaimable: {}", format_bytes(report.estimate().bytes()))?;
+    Ok(())
 }
 
-pub fn print_list_results(targets: &[&Target], inspections: &[Inspection]) {
-    println!("Found cleanup targets:");
+pub fn print_list_results(
+    targets: &[&Target],
+    inspections: &[Inspection],
+    home: Option<&Path>,
+) -> Result<(), AppError> {
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    writeln!(output, "Found cleanup targets:")?;
     for (target, inspection) in targets.iter().zip(inspections) {
         if inspection.listings.is_empty() {
             continue;
         }
 
-        println!("【{}】", target.display_name());
+        writeln!(output, "【{}】", target.display_name())?;
         for listing in &inspection.listings {
             match listing {
-                Listing::Count { label, count } => println!(
+                Listing::Count { label, count } => writeln!(
+                    output,
                     "- {} ({} location{} found)",
                     label,
                     count,
                     if *count == 1 { "" } else { "s" }
-                ),
-                Listing::Path(path) => println!("- {} (exists)", path.display()),
-                Listing::Detail(detail) => println!("- {detail}"),
-            }
+                )?,
+                Listing::Path(path) => writeln!(output, "- {} (exists)", display_path(path, home))?,
+                Listing::Detail(detail) => writeln!(output, "- {detail}")?,
+            };
         }
-        println!();
+        writeln!(output)?;
     }
+    Ok(())
 }
 
-pub fn print_deletion_plan(report: &ScanReport, targets: &[&Target], verbose: bool) {
-    println!("Deletion plan:");
+pub fn print_deletion_plan(
+    report: &ScanReport,
+    targets: &[&Target],
+    verbose: bool,
+    home: Option<&Path>,
+) -> Result<(), AppError> {
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    writeln!(output, "Deletion plan:")?;
     for target in targets {
         if let Some(target_report) = report.report_for(target.id()) {
-            println!(
+            writeln!(
+                output,
                 "- {:<8} {:>10} across {} item(s)",
                 target.display_name(),
                 format_bytes(target_report.estimate().bytes()),
                 target_report.candidates.len()
-            );
+            )?;
             for candidate_report in &target_report.candidates {
                 if verbose {
-                    println!(
+                    writeln!(
+                        output,
                         "    • {:<60} {}",
-                        candidate_display(&candidate_report.candidate.action),
+                        candidate_display(candidate_report.candidate.action(), home),
                         format_bytes(candidate_report.estimate().bytes())
-                    );
+                    )?;
                 } else {
-                    println!("    • {}", candidate_display(&candidate_report.candidate.action));
+                    writeln!(
+                        output,
+                        "    • {}",
+                        candidate_display(candidate_report.candidate.action(), home)
+                    )?;
                 }
             }
         }
     }
-    println!("Total to delete: {}", format_bytes(report.estimate().bytes()));
+    writeln!(output, "Total to delete: {}", format_bytes(report.estimate().bytes()))?;
+    Ok(())
+}
+
+pub fn print_cleanup_report(
+    report: &ApplyReport,
+    targets: usize,
+    home: Option<&Path>,
+) -> Result<(), AppError> {
+    {
+        let stderr = io::stderr();
+        let mut errors = stderr.lock();
+        for outcome in report.outcomes() {
+            match outcome {
+                ActionOutcome::Path { path, status: PathStatus::Retained } => {
+                    writeln!(
+                        errors,
+                        "Retained: {} (the directory was not empty after cleanup)",
+                        display_path(path, home)
+                    )?;
+                }
+                ActionOutcome::Path { path, status: PathStatus::Failed(error) } => {
+                    writeln!(errors, "Failed: {}: {error}", display_path(path, home))?;
+                }
+                ActionOutcome::Process { label, program, status: ProcessStatus::Failed(error) } => {
+                    writeln!(errors, "Failed: {label} via '{program}': {error}")?;
+                }
+                _ => {}
+            }
+        }
+        if let Some(error) = report.estimation_error() {
+            writeln!(errors, "Failed to calculate reclaimed footprint: {error}")?;
+        }
+    }
+
+    print_stdout_line(&messages::deletion_summary(
+        report.freed_estimate().bytes(),
+        report.removed_count(),
+        report.absent_count(),
+        report.retained_count(),
+        report.failed_count(),
+        targets,
+    ))
 }

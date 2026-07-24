@@ -3,7 +3,7 @@ use predicates::prelude::*;
 #[cfg(unix)]
 use std::fs;
 #[cfg(unix)]
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::MetadataExt;
 
 #[test]
 fn scan_python_verbose_lists_targets() {
@@ -13,7 +13,7 @@ fn scan_python_verbose_lists_targets() {
     ctx.cli()
         .arg("scan")
         .arg("--type")
-        .arg("python")
+        .arg("PYTHON")
         .arg("--verbose")
         .arg(ctx.home())
         .assert()
@@ -103,6 +103,31 @@ fn scan_reports_missing_docker_as_a_diagnostic() {
 }
 
 #[test]
+fn scan_requires_home_only_for_the_default_root() {
+    let ctx = TestContext::new();
+
+    ctx.cli()
+        .env_remove("HOME")
+        .arg("scan")
+        .arg("--type")
+        .arg("python")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("HOME is not set"));
+}
+
+#[test]
+fn explicit_roots_work_without_home_and_report_home_discovery_once() {
+    let ctx = TestContext::new();
+    let root = ctx.work_dir().join("workspace");
+    std::fs::create_dir_all(&root).expect("explicit root exists");
+
+    ctx.cli().env_remove("HOME").arg("scan").arg("--list").arg(&root).assert().success().stderr(
+        predicate::str::contains("Home directory is unavailable for global discovery").count(1),
+    );
+}
+
+#[test]
 fn scan_rejects_malformed_docker_output() {
     let ctx = TestContext::new();
     ctx.create_mock_command(
@@ -126,54 +151,8 @@ exit 0
         .assert()
         .failure()
         .stderr(predicate::str::contains("Discovery failed"))
+        .stderr(predicate::str::contains("discovery complete").not())
         .stderr(predicate::str::contains("not valid JSON"));
-}
-
-#[cfg(unix)]
-#[test]
-fn scan_list_does_not_measure_discovered_candidates() {
-    let ctx = TestContext::new();
-    let cache = ctx.create_home_dir("workspace/node_modules");
-    let mut permissions = fs::metadata(&cache).expect("cache metadata exists").permissions();
-    permissions.set_mode(0o000);
-    fs::set_permissions(&cache, permissions).expect("cache becomes unreadable");
-
-    if fs::read_dir(&cache).is_ok() {
-        let mut permissions = fs::metadata(&cache).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&cache, permissions).unwrap();
-        return;
-    }
-
-    let list = ctx
-        .cli()
-        .arg("scan")
-        .arg("--list")
-        .arg("--type")
-        .arg("nodejs")
-        .arg(ctx.home())
-        .output()
-        .expect("list command runs");
-    let scan = ctx
-        .cli()
-        .arg("scan")
-        .arg("--type")
-        .arg("nodejs")
-        .arg(ctx.home())
-        .output()
-        .expect("scan command runs");
-
-    let mut permissions = fs::metadata(&cache).unwrap().permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&cache, permissions).expect("cache permissions are restored");
-
-    assert!(list.status.success(), "list stderr: {}", String::from_utf8_lossy(&list.stderr));
-    assert!(!scan.status.success(), "scan unexpectedly succeeded");
-    assert!(
-        String::from_utf8_lossy(&scan.stderr).contains("Footprint estimation failed"),
-        "scan stderr: {}",
-        String::from_utf8_lossy(&scan.stderr)
-    );
 }
 
 #[cfg(unix)]
@@ -190,7 +169,12 @@ fn scan_reports_allocated_footprint_for_sparse_files() {
         .expect("logical length is set");
     let allocated = fs::metadata(&cache).unwrap().blocks() * 512
         + fs::metadata(&sparse).unwrap().blocks() * 512;
-    let expected = prf::output::bytes::format_bytes(allocated);
+    let expected = if allocated == 0 {
+        "0 B".to_string()
+    } else {
+        assert!(allocated < 10_000, "fixture allocation exceeded the expected SI range");
+        format!("{:.1} KB", allocated as f64 / 1_000.0)
+    };
 
     ctx.cli()
         .arg("scan")

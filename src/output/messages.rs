@@ -26,36 +26,36 @@ pub fn footprint_calculation_complete(count: usize) -> String {
     )
 }
 
-pub fn deletion_complete(count: usize) -> String {
-    format!("{count}/{count} Deletion complete")
+pub fn deletion_complete(completed: usize, planned: usize) -> String {
+    format!("{completed}/{planned} Cleanup actions attempted")
 }
 
 pub fn nothing_to_delete() -> &'static str {
-    "Nothing to delete. All selected targets are already clean."
+    "No cleanup actions were discovered."
 }
 
 pub fn aborted() -> &'static str {
     "Aborted. No files were deleted."
 }
 
-pub fn deletion_summary(freed: u64, applied: usize, failed: usize, targets: usize) -> String {
-    let mut summary = format!(
-        "Reclaimed ~{} across {} {}: {} {} removed",
+pub fn deletion_summary(
+    freed: u64,
+    removed: usize,
+    absent: usize,
+    retained: usize,
+    failed: usize,
+    targets: usize,
+) -> String {
+    format!(
+        "Reclaimed ~{} across {} {}: {} completed, {} already absent, {} retained, {} failed.",
         format_bytes(freed),
         targets,
         plural(targets, "target", "targets"),
-        applied,
-        plural(applied, "item", "items"),
-    );
-    if failed > 0 {
-        summary.push_str(&format!(
-            ", {} {} could not be removed (not empty after cleanup)",
-            failed,
-            plural(failed, "item", "items"),
-        ));
-    }
-    summary.push('.');
-    summary
+        removed,
+        absent,
+        retained,
+        failed,
+    )
 }
 
 fn plural<'a>(count: usize, singular: &'a str, plural: &'a str) -> &'a str {
