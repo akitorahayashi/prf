@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Rust Environment
         uses: ./.github/actions/setup
@@ -17,7 +17,7 @@ jobs:
           rust-version: 1.90.0
           components: rustfmt,clippy
           install-mise: 'true'
-          mise-tools: just
+          mise-tools: just actionlint
 
       - name: Run Static Checks
         run: mise exec -- just check

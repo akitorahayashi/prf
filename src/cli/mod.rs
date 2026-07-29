@@ -1,11 +1,19 @@
+use std::io::{self, Write};
+
+use clap::builder::PossibleValuesParser;
 use clap::{Parser, Subcommand};
 
 use crate::app;
+use crate::cleanup::Scope;
 use crate::error::AppError;
-use crate::fs::roots::resolve_roots_with_current;
+use crate::targets::registry;
 
 pub mod run;
 pub mod scan;
+
+fn target_value_parser() -> PossibleValuesParser {
+    PossibleValuesParser::new(registry::names())
+}
 
 #[derive(Parser)]
 #[command(
@@ -29,8 +37,14 @@ enum Commands {
 }
 
 pub fn execute() {
-    if let Err(err) = try_execute() {
-        eprintln!("Error: {}", err);
+    if let Err(error) = try_execute() {
+        if matches!(&error, AppError::Io(source) if source.kind() == io::ErrorKind::BrokenPipe) {
+            return;
+        }
+        let write_result = writeln!(io::stderr().lock(), "Error: {error}");
+        if write_result.is_err_and(|source| source.kind() != io::ErrorKind::BrokenPipe) {
+            std::process::exit(1);
+        }
         std::process::exit(1);
     }
 }
@@ -40,13 +54,9 @@ fn try_execute() -> Result<(), AppError> {
 
     match cli.command {
         Commands::Scan(args) => {
-            let targets = args.resolve_targets()?;
-            let options = app::scan::ScanOptions {
-                targets,
-                roots: resolve_roots_with_current(&args.paths, args.current)?,
-                verbose: args.verbose,
-                current: args.current,
-            };
+            let scope = Scope::from_environment(&args.paths, args.current)?;
+            let targets = args.resolve_targets(scope.mode())?;
+            let options = app::scan::ScanOptions { targets, scope, verbose: args.verbose };
             if args.list {
                 app::scan::list_targets(options)?;
             } else {
@@ -54,15 +64,15 @@ fn try_execute() -> Result<(), AppError> {
             }
         }
         Commands::Run(args) => {
+            let scope = Scope::from_environment(&args.paths, args.current)?;
             let interactive = args.interactive();
-            let targets = args.resolve_targets()?;
+            let targets = args.resolve_targets(scope.mode())?;
             let options = app::run::RunOptions {
                 targets,
                 interactive,
-                roots: resolve_roots_with_current(&args.paths, args.current)?,
+                scope,
                 verbose: args.verbose,
                 assume_yes: args.yes,
-                current: args.current,
             };
             app::run::execute(options)?;
         }

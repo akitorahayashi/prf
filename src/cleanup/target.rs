@@ -66,7 +66,7 @@ impl Target {
     }
 
     pub fn inspect(&self, scope: &Scope) -> Result<Inspection, AppError> {
-        if scope.current() && !self.scope_support.supports_current() {
+        if scope.is_current() && !self.scope_support.supports_current() {
             return Err(AppError::UnsupportedCurrentModeTarget(self.id.to_string()));
         }
         self.discovery.inspect(self.id, scope)
@@ -95,7 +95,8 @@ mod tests {
             ScopeSupport::DefaultOnly,
             Discovery::Inspector(unexpected_inspection),
         );
-        let scope = Scope::new(Vec::new(), true);
+        let scope = Scope::resolve(&[], true, Some("/home".into()), "/working".into())
+            .expect("current scope resolves");
 
         assert!(matches!(
             target.inspect(&scope),

@@ -1,7 +1,4 @@
-#[allow(dead_code, unused_imports)]
-mod harness;
-
-use harness::TestContext;
+use crate::harness::TestContext;
 use predicates::prelude::*;
 
 #[test]

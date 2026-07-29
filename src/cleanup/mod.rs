@@ -8,10 +8,10 @@ pub mod scope;
 pub mod target;
 
 pub use action::{Action, EntryKind};
-pub use apply::{ApplySummary, apply_plan};
+pub use apply::{ActionOutcome, ApplyReport, PathStatus, ProcessStatus, apply_plan};
 pub use candidate::Candidate;
-pub use discovery::{Diagnostic, Discovery, Inspection, Listing, Rule};
-pub use plan::{RemovalCatalog, RemovalPlan};
-pub use report::{ScanReport, TargetReport};
-pub use scope::Scope;
+pub use discovery::{Discovery, Inspection, Listing, Rule};
+pub use plan::RemovalCatalog;
+pub use report::ScanReport;
+pub use scope::{Scope, ScopeMode};
 pub use target::{ScopeSupport, Target, TargetId};

@@ -42,27 +42,26 @@ impl Root {
         Self { id, path }
     }
 
+    #[cfg(test)]
     pub const fn id(&self) -> RootId {
         self.id
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct Breakdown {
     paths: BTreeMap<RootId, Estimate>,
+    #[cfg(test)]
     reported: Estimate,
     total: Estimate,
 }
 
 impl Breakdown {
-    pub fn path(&self, root: RootId) -> Estimate {
-        self.paths.get(&root).copied().unwrap_or(Estimate::ZERO)
+    pub fn path(&self, root: RootId) -> Result<Estimate, Error> {
+        self.paths.get(&root).copied().ok_or(Error::InvalidRoot(root.index()))
     }
 
+    #[cfg(test)]
     pub const fn reported(&self) -> Estimate {
         self.reported
     }
@@ -137,7 +136,7 @@ impl Index {
             if selected_occurrences >= linked.link_count
                 && let Some(root) = attributed_root
             {
-                let current = paths.get(&root).copied().unwrap_or(Estimate::ZERO);
+                let current = paths.get(&root).copied().ok_or(Error::InvalidRoot(root.index()))?;
                 paths.insert(root, current.checked_add(linked.allocated)?);
             }
         }
@@ -146,7 +145,12 @@ impl Index {
         let reported = reported.into_iter().try_fold(Estimate::ZERO, Estimate::checked_add)?;
         let total = path_total.checked_add(reported)?;
 
-        Ok(Breakdown { paths, reported, total })
+        Ok(Breakdown {
+            paths,
+            #[cfg(test)]
+            reported,
+            total,
+        })
     }
 
     fn normalize_selection<I>(&self, roots: I) -> Result<Vec<RootId>, Error>
@@ -163,20 +167,7 @@ impl Index {
             }
         }
 
-        let maximal = selected
-            .iter()
-            .copied()
-            .filter(|candidate| {
-                !selected.iter().copied().any(|other| {
-                    candidate != &other
-                        && is_strict_descendant(
-                            &self.paths[candidate.index()],
-                            &self.paths[other.index()],
-                        )
-                })
-            })
-            .collect();
-        Ok(maximal)
+        Ok(maximal_root_ids(&self.paths, selected))
     }
 }
 
@@ -189,8 +180,22 @@ fn validate_roots(roots: &[Root]) -> Result<(), Error> {
     Ok(())
 }
 
-fn is_strict_descendant(child: &Path, ancestor: &Path) -> bool {
-    child != ancestor && child.starts_with(ancestor)
+fn maximal_root_ids(paths: &[PathBuf], mut roots: Vec<RootId>) -> Vec<RootId> {
+    roots.sort_unstable_by(|left, right| {
+        paths[left.index()].components().cmp(paths[right.index()].components())
+    });
+    let mut maximal: Vec<RootId> = Vec::with_capacity(roots.len());
+    for root in roots {
+        if maximal
+            .last()
+            .is_some_and(|ancestor| paths[root.index()].starts_with(&paths[ancestor.index()]))
+        {
+            continue;
+        }
+        maximal.push(root);
+    }
+    maximal.sort_unstable();
+    maximal
 }
 
 #[cfg(unix)]
@@ -330,15 +335,13 @@ impl WalkState {
 fn measure_unix(roots: &[Root]) -> Result<Index, Error> {
     let roots_by_path =
         roots.iter().map(|root| (root.path.clone(), root.id)).collect::<HashMap<_, _>>();
-    let maximal_roots = roots
-        .iter()
-        .filter(|candidate| {
-            !roots.iter().any(|other| {
-                candidate.id != other.id && is_strict_descendant(candidate.path(), other.path())
-            })
-        })
-        .cloned()
-        .collect::<Vec<_>>();
+    let maximal_roots = maximal_root_ids(
+        &roots.iter().map(|root| root.path.clone()).collect::<Vec<_>>(),
+        roots.iter().map(|root| root.id).collect(),
+    )
+    .into_iter()
+    .map(|root| roots[root.index()].clone())
+    .collect::<Vec<_>>();
 
     let state = Arc::new(WalkState {
         roots_by_path,
@@ -500,6 +503,48 @@ mod tests {
             .collect::<Vec<_>>();
         let ids = roots.iter().map(Root::id).collect();
         (Index::measure(&roots).expect("measurement succeeds"), ids)
+    }
+
+    #[test]
+    fn optimized_subset_normalization_matches_a_quadratic_oracle() {
+        let paths = vec![
+            PathBuf::from("/a"),
+            PathBuf::from("/a/child"),
+            PathBuf::from("/a/sibling"),
+            PathBuf::from("/a-neighbor"),
+            PathBuf::from("/z"),
+            PathBuf::from("/z/child"),
+        ];
+        let index = Index {
+            paths: paths.clone(),
+            ordinary: vec![Estimate::ZERO; paths.len()],
+            linked_files: Vec::new(),
+        };
+
+        for mask in 0..(1usize << paths.len()) {
+            let selected = (0..paths.len())
+                .filter(|root| mask & (1 << root) != 0)
+                .map(RootId::new)
+                .collect::<Vec<_>>();
+            let actual = index.normalize_selection(selected.clone()).expect("selection is valid");
+            let expected = selected
+                .iter()
+                .copied()
+                .filter(|candidate| {
+                    !selected.iter().copied().any(|other| {
+                        candidate != &other
+                            && paths[candidate.index()].starts_with(&paths[other.index()])
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            assert_eq!(actual, expected, "selection differs for subset mask {mask:#08b}");
+        }
+    }
+
+    #[test]
+    fn breakdown_rejects_unknown_root_lookups() {
+        assert!(matches!(Breakdown::default().path(RootId::new(0)), Err(Error::InvalidRoot(0))));
     }
 
     #[test]

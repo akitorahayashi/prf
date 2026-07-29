@@ -12,6 +12,7 @@ pub enum Error {
         source: io::Error,
     },
 
+    #[cfg(not(unix))]
     #[error("allocated storage measurement is unsupported on this platform")]
     UnsupportedPlatform,
 
