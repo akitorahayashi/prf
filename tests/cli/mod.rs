@@ -1,5 +1,5 @@
 mod aliases;
+mod clean;
 mod help_and_version;
-mod run;
 mod safety;
 mod scan;

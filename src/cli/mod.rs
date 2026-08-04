@@ -4,12 +4,13 @@ use clap::builder::PossibleValuesParser;
 use clap::{Parser, Subcommand};
 
 use crate::app;
-use crate::cleanup::Scope;
 use crate::error::AppError;
 use crate::targets::registry;
 
-pub mod run;
+pub mod clean;
 pub mod scan;
+mod scope;
+mod target;
 
 fn target_value_parser() -> PossibleValuesParser {
     PossibleValuesParser::new(registry::names())
@@ -31,9 +32,9 @@ enum Commands {
     /// Perform a dry-run scan to see what can be removed.
     #[command(visible_alias = "sc")]
     Scan(scan::ScanArgs),
-    /// Delete files discovered by a scan.
-    #[command(visible_alias = "rn")]
-    Run(run::RunArgs),
+    /// Scan, select, and delete development caches and generated artifacts.
+    #[command(visible_alias = "cln")]
+    Clean(clean::CleanArgs),
 }
 
 pub fn execute() {
@@ -54,8 +55,9 @@ fn try_execute() -> Result<(), AppError> {
 
     match cli.command {
         Commands::Scan(args) => {
-            let scope = Scope::from_environment(&args.paths, args.current)?;
-            let targets = args.resolve_targets(scope.mode())?;
+            let scope = args.scope.resolve()?;
+            let request = args.targets.into_request();
+            let targets = request.resolve(scope.mode())?;
             let options = app::scan::ScanOptions { targets, scope, verbose: args.verbose };
             if args.list {
                 app::scan::list_targets(options)?;
@@ -63,18 +65,23 @@ fn try_execute() -> Result<(), AppError> {
                 app::scan::execute(options)?;
             }
         }
-        Commands::Run(args) => {
-            let scope = Scope::from_environment(&args.paths, args.current)?;
-            let interactive = args.interactive();
-            let targets = args.resolve_targets(scope.mode())?;
-            let options = app::run::RunOptions {
-                targets,
-                interactive,
+        Commands::Clean(args) => {
+            let scope = args.scope.resolve()?;
+            let request = args.targets.into_request();
+            let prompt_for_targets = request.is_omitted();
+            let targets = request.resolve(scope.mode())?;
+            let selection = if prompt_for_targets {
+                app::clean::CleanSelection::PromptFrom(targets)
+            } else {
+                app::clean::CleanSelection::Fixed(targets)
+            };
+            let options = app::clean::CleanOptions {
+                selection,
                 scope,
                 verbose: args.verbose,
                 assume_yes: args.yes,
             };
-            app::run::execute(options)?;
+            app::clean::execute(options)?;
         }
     }
 

@@ -298,8 +298,12 @@ mod tests {
     use crate::cleanup::{Action, EntryKind};
     const TEST_TARGET: TargetId = TargetId::new("test");
 
-    fn default_scope(roots: Vec<PathBuf>, home: Option<PathBuf>) -> Scope {
-        Scope::resolve(&roots, false, home, "/working".into()).expect("default scope resolves")
+    fn current_scope(root: PathBuf) -> Scope {
+        Scope::resolve(true, None, root).expect("current scope resolves")
+    }
+
+    fn default_scope(home: PathBuf) -> Scope {
+        Scope::resolve(false, Some(home), "/working".into()).expect("default scope resolves")
     }
 
     fn candidate_paths(inspection: &Inspection) -> Vec<PathBuf> {
@@ -315,7 +319,7 @@ mod tests {
         matched.create_dir_all().expect("matched directory exists");
         matched.child("index.js").write_str("cache").expect("cache file exists");
 
-        let scope = default_scope(vec![temp.path().to_path_buf()], Some(temp.path().to_path_buf()));
+        let scope = current_scope(temp.path().to_path_buf());
         let inspection = inspect_rules(TEST_TARGET, &scope, RULES).expect("inspection succeeds");
 
         assert_eq!(candidate_paths(&inspection), vec![matched.path().to_path_buf()]);
@@ -335,7 +339,7 @@ mod tests {
         temp.child("crate/Cargo.toml").write_str("[package]").expect("manifest exists");
         temp.child("other/target").create_dir_all().expect("unowned target exists");
 
-        let scope = default_scope(vec![temp.path().to_path_buf()], Some(temp.path().to_path_buf()));
+        let scope = current_scope(temp.path().to_path_buf());
         let inspection = inspect_rules(TEST_TARGET, &scope, RULES).expect("inspection succeeds");
 
         assert_eq!(candidate_paths(&inspection), vec![owned.path().to_path_buf()]);
@@ -355,7 +359,7 @@ mod tests {
         let build = package.child(".build");
         build.create_dir_all().expect("build directory exists");
 
-        let scope = default_scope(vec![temp.path().to_path_buf()], Some(temp.path().to_path_buf()));
+        let scope = current_scope(temp.path().to_path_buf());
         let inspection = inspect_rules(TEST_TARGET, &scope, RULES).expect("inspection succeeds");
 
         assert_eq!(candidate_paths(&inspection), vec![build.path().to_path_buf()]);
@@ -390,7 +394,7 @@ mod tests {
         symlink(temp.path().join("missing"), package.path().join("dangling-link"))
             .expect("dangling link exists");
 
-        let scope = default_scope(vec![temp.path().to_path_buf()], Some(temp.path().to_path_buf()));
+        let scope = current_scope(temp.path().to_path_buf());
         let inspection = inspect_rules(TEST_TARGET, &scope, RULES).expect("inspection succeeds");
 
         assert_eq!(inspection.candidates.len(), 3);
@@ -413,8 +417,7 @@ mod tests {
         let link = project.child("node_modules");
         symlink(outside.path(), link.path()).expect("directory link exists");
 
-        let scope =
-            default_scope(vec![project.path().to_path_buf()], Some(temp.path().to_path_buf()));
+        let scope = current_scope(project.path().to_path_buf());
         let inspection = inspect_rules(TEST_TARGET, &scope, RULES).expect("inspection succeeds");
 
         assert_eq!(inspection.candidates.len(), 1);
@@ -431,7 +434,7 @@ mod tests {
         let temp = TempDir::new().expect("temp directory is created");
         let missing = temp.path().join("missing");
 
-        let scope = default_scope(vec![missing.clone()], Some(temp.path().to_path_buf()));
+        let scope = current_scope(missing.clone());
         let inspection = inspect_rules(TEST_TARGET, &scope, RULES).expect("inspection succeeds");
 
         assert_eq!(
@@ -448,14 +451,13 @@ mod tests {
         let home = TempDir::new().expect("temp home is created");
         let cache = home.child("Library/Caches/example");
         cache.create_dir_all().expect("cache exists");
-        let default_scope = default_scope(Vec::new(), Some(home.path().to_path_buf()));
+        let default_scope = default_scope(home.path().to_path_buf());
         let default_inspection =
             inspect_rules(TEST_TARGET, &default_scope, RULES).expect("default inspection succeeds");
         assert_eq!(candidate_paths(&default_inspection), vec![cache.path().to_path_buf()]);
 
         let current_scope =
-            Scope::resolve(&[], true, Some(home.path().to_path_buf()), home.path().to_path_buf())
-                .expect("current scope resolves");
+            Scope::resolve(true, None, home.path().to_path_buf()).expect("current scope resolves");
         let current_inspection =
             inspect_rules(TEST_TARGET, &current_scope, RULES).expect("current inspection succeeds");
         assert!(current_inspection.candidates.is_empty());

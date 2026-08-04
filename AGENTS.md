@@ -5,10 +5,10 @@
 `prf` is a Rust 2024 CLI for finding and removing development caches and generated artifacts. It
 is macOS-oriented: the catalog includes project-local Python, Rust, Node.js, Xcode, and SwiftPM
 artifacts, vetted macOS home-directory caches for Xcode and Homebrew, and Docker system data.
-`scan` performs discovery without mutation; `run` scans first and applies only actions represented
-by the resulting report. The default scan root is `~/Desktop`, explicit path arguments replace that
-root, and `--current` selects the process working directory while suppressing global targets and
-home-relative discovery.
+`scan` performs discovery without mutation; `clean` scans first and applies only actions represented
+by the resulting report. The default scan root is `~/Desktop`; `--current` selects the process
+working directory while suppressing global targets and home-relative discovery. Arbitrary scan-root
+arguments are not part of the CLI.
 
 ## Directory Structure
 
@@ -20,7 +20,7 @@ src/
   cli/             Clap commands, registry-backed target parsing, scope resolution, and dispatch
   app/
     scan.rs        Parallel inspection, footprint measurement, and scan/list rendering
-    run.rs         Scan, interactive selection, confirmation, and action application
+    clean.rs       Scan, interactive selection, confirmation, and action application
   cleanup/
     target.rs      Target identity, scope support, and discovery contract
     scope.rs       Resolved default or current scope and captured home
@@ -73,22 +73,21 @@ The local task surface is:
 
 ### Scan-to-Apply Flow
 
-`cli` resolves targets and roots, then `app::scan::scan_targets()` inspects selected targets in
+`cli` resolves targets and scope, then `app::scan::scan_targets()` inspects selected targets in
 parallel. Each `Inspection` can contain candidates, list-only information, and non-fatal
 diagnostics. A `RemovalCatalog` owns the scanned candidates and canonicalizes their paths, and one
 footprint index measures its maximal physical roots before candidates enter a `ScanReport`.
 
-`run` always uses this same scan flow. Interactive target selection produces a subset of the report,
-confirmation approves that subset, and `apply_plan()` receives the subset's canonical
+`clean` always uses this same scan flow. Interactive target selection produces a subset of the
+report, confirmation approves that subset, and `apply_plan()` receives the subset's canonical
 `RemovalPlan`. No additional action is synthesized after scanning; estimation and application use
 the same normalized roots.
 
 ### Scope Semantics
 
-No path argument resolves to `~/Desktop`; an unset `HOME` is an error. Explicit paths replace only
-the recursive roots and continue without `HOME` while reporting unavailable home discovery once.
-Exact duplicate roots are removed while descendant roots remain distinct. In default mode,
-applicable `HomePaths` rules are still evaluated in addition to those roots.
+Default mode resolves its only recursive root to `~/Desktop`; an unset `HOME` is an error.
+Applicable `HomePaths` rules are evaluated in addition to that root. Arbitrary roots are not
+accepted.
 
 `--current` is not an alias for passing `.`. It resolves the current working directory, excludes
 targets whose `ScopeSupport` is `DefaultOnly`, and disables all `HomePaths` rules. Brew and Docker
@@ -109,6 +108,8 @@ Detailed discovery, planning, footprint, application, Docker, and output mechani
 - Every applied action originates in the confirmed subset of the immediately preceding scan report.
 - A terminal symbolic-link candidate removes only the link entry and never follows its target.
 - Destructive execution requires confirmation unless `-y/--yes` is present.
+- Interactive selection and confirmation require terminal stdin; automation names targets or uses
+  `--all` and supplies `-y/--yes`.
 - Current mode cannot select default-only targets or evaluate global home-relative rules.
 - Missing roots and unavailable optional tools are visible diagnostics; failed commands, malformed
   structured output, footprint overflow, and unexpected filesystem errors are explicit failures.

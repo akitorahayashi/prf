@@ -12,6 +12,10 @@ Testing is organized by ownership boundary and externally observable behavior:
 | Filesystem tests | `src/fs/` | Mutation mechanics |
 | Integration tests | `tests/cli.rs` with cases under `tests/cli/` | CLI, safety, and packaging contracts through compiled binary execution |
 
+`app::clean` tests inject recorded target-selection and confirmation decisions. This exercises the
+interactive orchestration contract without weakening the production requirement that prompts read
+from terminal stdin. CLI integration tests cover the corresponding non-interactive errors.
+
 ## Principles
 
 - Unit tests validate owner logic at module scope.

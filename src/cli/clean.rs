@@ -4,7 +4,7 @@ use super::scope::ScopeArgs;
 use super::target::TargetArgs;
 
 #[derive(Args)]
-pub struct ScanArgs {
+pub struct CleanArgs {
     #[command(flatten)]
     pub targets: TargetArgs,
 
@@ -12,17 +12,18 @@ pub struct ScanArgs {
     pub scope: ScopeArgs,
 
     #[arg(
+        short = 'y',
+        long = "yes",
+        action = ArgAction::SetTrue,
+        help = "Skip deletion confirmation; target selection still appears when required"
+    )]
+    pub yes: bool,
+
+    #[arg(
         short,
         long,
         action = ArgAction::SetTrue,
-        help = "Show every discovered cleanup action and its estimate"
+        help = "Show every selected cleanup action and its estimate"
     )]
     pub verbose: bool,
-
-    #[arg(
-        long = "list",
-        action = ArgAction::SetTrue,
-        help = "List cleanup locations without measuring their footprints"
-    )]
-    pub list: bool,
 }

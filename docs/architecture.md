@@ -17,7 +17,7 @@
 |---|---|---|
 | Binary entry | `src/main.rs`, `src/lib.rs` | Process entry and minimal public execution facade |
 | CLI adapter | `src/cli/` | Clap parsing, target resolution, and app option conversion |
-| Application orchestration | `src/app/` | Scan and run use-case sequencing |
+| Application orchestration | `src/app/` | Scan and clean use-case sequencing |
 | Cleanup domain | `src/cleanup/` | Target contracts, discovery, candidates, removal plans, application, and reports |
 | Footprint domain | `src/footprint/` | Allocated-space measurement, reported estimates, and selection-aware aggregation |
 | Target definitions | `src/targets/` | Declarative target definitions, the authoritative registry, and target-specific inspection |
@@ -34,12 +34,14 @@ src/
 ├── error.rs
 ├── cli/
 │   ├── mod.rs
+│   ├── scope.rs
+│   ├── target.rs
 │   ├── scan.rs
-│   └── run.rs
+│   └── clean.rs
 ├── app/
 │   ├── mod.rs
 │   ├── scan.rs
-│   └── run.rs
+│   └── clean.rs
 ├── cleanup/
 │   ├── mod.rs
 │   ├── target.rs
@@ -87,16 +89,21 @@ A standard target consists of one module containing metadata and standard discov
 registry entry. Docker uses the target-specific inspector extension because its discovery protocol
 depends on Docker CLI availability and structured command output.
 
+The CLI represents target input as `Omitted`, `Named`, or `All`. `scan` resolves both `Omitted` and
+`All` to every eligible registry target. `clean` maps `Omitted` to an interactive selection over the
+scanned report and maps `Named` and `All` to fixed selections. Positional target IDs and `--all` are
+mutually exclusive.
+
 ## Scope Model
 
-`Scope` is either `Current { root }` or `Default { roots, home }`. CLI resolution captures the
-working directory and `HOME` once before target selection and inspection. Current scope contains
-exactly one root, disables home-relative discovery, and rejects default-only targets.
+`Scope` is either `Current { root }` or `Default { root, home }`. CLI resolution captures the
+working directory and `HOME` once before target selection and inspection. Default scope always uses
+`~/Desktop` as its recursive root and evaluates applicable home-relative rules. An unavailable
+`HOME` makes default scope invalid.
 
-Default scope uses `~/Desktop` when no positional path is supplied. Positional paths replace the
-recursive root set while preserving home-relative discovery. Exact duplicate roots are removed;
-descendant roots remain distinct because each root owns an independent discovery-depth boundary.
-Explicit roots remain usable without `HOME`, with one diagnostic for unavailable home discovery.
+Current scope uses the captured working directory as its only root, does not require `HOME`, disables
+home-relative discovery, and rejects default-only targets. The CLI accepts no arbitrary scan-root
+argument; another directory is selected by changing the working directory and using `--current`.
 
 ## Discovery Model
 
@@ -148,6 +155,8 @@ memory grows with traversal depth rather than the full removal tree.
 
 Terminal writes propagate through the application error model. A broken output pipe terminates
 successfully at the process boundary; other output failures remain explicit.
+Target-selection and deletion-confirmation prompts require terminal stdin. Non-interactive cleanup
+uses positional targets or `--all`, plus `-y/--yes` when a non-empty deletion plan needs approval.
 
 ## Footprint Model
 
@@ -184,8 +193,9 @@ failed removal can make eventual free-space changes differ from scan output.
 - Retained and failed confirmed actions produce a non-zero result after outcome rendering.
 - Current-directory mode excludes registered targets without current-mode support.
 - Global discovery rules are absent from current-mode inspection.
-- The default scan root is `~/Desktop`; a missing `HOME` without an explicit path or `--current`
-  produces an error.
+- The default scan root is `~/Desktop`; a missing `HOME` without `--current` produces an error.
+- Interactive decisions require terminal stdin; automation explicitly selects targets and supplies
+  `-y/--yes`.
 - Missing tools, failed processes, malformed command output, and traversal problems are explicit
   errors or diagnostics.
 - Footprint overflow and unsupported allocated-storage measurement are explicit errors rather than

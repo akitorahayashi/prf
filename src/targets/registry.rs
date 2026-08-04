@@ -26,32 +26,27 @@ pub fn find(name: &str) -> Option<&'static Target> {
     TARGETS.iter().copied().find(|target| target.id().as_str().eq_ignore_ascii_case(name))
 }
 
-pub fn resolve(
-    names: &[String],
-    all_requested: bool,
-    mode: ScopeMode,
-) -> Result<Vec<&'static Target>, AppError> {
+pub fn eligible(mode: ScopeMode) -> Result<Vec<&'static Target>, AppError> {
     validate()?;
 
-    let selected = if all_requested || names.is_empty() {
-        TARGETS
-            .iter()
-            .copied()
-            .filter(|target| {
-                mode != ScopeMode::Current || target.scope_support().supports_current()
-            })
-            .collect()
-    } else {
-        let mut seen = HashSet::new();
-        let mut selected = Vec::new();
-        for name in names {
-            let target = find(name).ok_or_else(|| AppError::InvalidTarget(name.clone()))?;
-            if seen.insert(target.id()) {
-                selected.push(target);
-            }
+    Ok(TARGETS
+        .iter()
+        .copied()
+        .filter(|target| mode != ScopeMode::Current || target.scope_support().supports_current())
+        .collect())
+}
+
+pub fn resolve(names: &[String], mode: ScopeMode) -> Result<Vec<&'static Target>, AppError> {
+    validate()?;
+
+    let mut seen = HashSet::new();
+    let mut selected = Vec::new();
+    for name in names {
+        let target = find(name).ok_or_else(|| AppError::InvalidTarget(name.clone()))?;
+        if seen.insert(target.id()) {
+            selected.push(target);
         }
-        selected
-    };
+    }
 
     if mode == ScopeMode::Current {
         let unsupported: Vec<&str> = selected
@@ -111,17 +106,30 @@ mod tests {
 
     #[test]
     fn explicit_selection_resolves_case_insensitively_and_deduplicates() {
-        let selected =
-            resolve(&["PYTHON".to_string(), "python".to_string()], false, ScopeMode::Default)
-                .expect("selection resolves");
+        let selected = resolve(&["PYTHON".to_string(), "python".to_string()], ScopeMode::Default)
+            .expect("selection resolves");
 
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].id().as_str(), "python");
     }
 
     #[test]
+    fn explicit_selection_preserves_first_occurrence_order() {
+        let selected = resolve(
+            &["rust".to_string(), "python".to_string(), "rust".to_string()],
+            ScopeMode::Default,
+        )
+        .expect("selection resolves");
+
+        assert_eq!(
+            selected.iter().map(|target| target.id().as_str()).collect::<Vec<_>>(),
+            vec!["rust", "python"]
+        );
+    }
+
+    #[test]
     fn current_defaults_derive_from_registered_scope_support() {
-        let selected = resolve(&[], false, ScopeMode::Current).expect("current defaults resolve");
+        let selected = eligible(ScopeMode::Current).expect("current defaults resolve");
 
         assert!(selected.iter().all(|target| target.scope_support() == ScopeSupport::AllModes));
     }
@@ -129,7 +137,7 @@ mod tests {
     #[test]
     fn explicit_default_only_target_is_rejected_in_current_mode() {
         assert!(matches!(
-            resolve(&["docker".to_string()], false, ScopeMode::Current),
+            resolve(&["docker".to_string()], ScopeMode::Current),
             Err(AppError::UnsupportedCurrentModeTarget(_))
         ));
     }
@@ -137,7 +145,7 @@ mod tests {
     #[test]
     fn every_registered_name_resolves_case_insensitively() {
         for name in names() {
-            let selected = resolve(&[name.to_ascii_uppercase()], false, ScopeMode::Default)
+            let selected = resolve(&[name.to_ascii_uppercase()], ScopeMode::Default)
                 .expect("registered name resolves");
             assert_eq!(selected[0].id().as_str(), name);
         }

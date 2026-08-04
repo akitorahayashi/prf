@@ -18,8 +18,8 @@
 
 The CLI currently uses command-line flags as the primary runtime configuration surface.
 
-- Target selection: `--type`, `--all`
-- Scope selection: `--current` or explicit path arguments
+- Target selection: positional `TARGET...` values or `--all`
+- Scope selection: default `~/Desktop` mode or `-c/--current`
 - Deletion confirmation control: `-y/--yes`
 - Verbose reporting: `-v/--verbose`
 
