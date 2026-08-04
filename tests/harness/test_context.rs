@@ -28,6 +28,7 @@ impl TestContext {
         let bin_dir = root.path().join("bin");
 
         fs::create_dir_all(&home).expect("home directory is created");
+        fs::create_dir_all(home.join("Desktop")).expect("default scan root is created");
         fs::create_dir_all(&work_dir).expect("work directory is created");
         fs::create_dir_all(&bin_dir).expect("mock bin directory is created");
 

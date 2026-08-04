@@ -95,7 +95,7 @@ mod tests {
             ScopeSupport::DefaultOnly,
             Discovery::Inspector(unexpected_inspection),
         );
-        let scope = Scope::resolve(&[], true, Some("/home".into()), "/working".into())
+        let scope = Scope::resolve(true, Some("/home".into()), "/working".into())
             .expect("current scope resolves");
 
         assert!(matches!(

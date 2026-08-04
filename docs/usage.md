@@ -3,29 +3,38 @@
 The scan flow executes via:
 
 ```sh
-prf scan --all                       # Scan all targets (default set)
-prf scan --type python ~/Desktop     # Scan only python targets
-prf scan --type rust --verbose .     # Show item-level paths and footprint contributions
-prf scan --list ~/Desktop            # Fast target listing without footprint measurement
-prf sc --current                     # Alias; scan only current directory
+prf scan                              # Scan every default-scope target
+prf scan python rust                  # Scan multiple named targets
+prf scan rust --current --verbose     # Inspect Rust artifacts in the current directory
+prf scan --list                       # List targets without footprint measurement
+prf sc --current                      # Alias; scan only the current directory
 ```
 
-The delete flow executes via:
+The cleanup flow executes via:
 
 ```sh
-prf run ~/Desktop                    # Interactive target selection + confirmation
-prf run --type nodejs -y ~/Desktop   # Non-interactive deletion for one target
-prf run --all -y ~/Desktop           # Delete all targets without prompts
-prf rn --current --type rust -y      # Alias; current-directory scoped cleanup
+prf clean                             # Interactive target selection + confirmation
+prf clean nodejs -y                   # Clean one target without confirmation
+prf clean python rust                 # Clean multiple targets, with confirmation
+prf clean --all -y                    # Clean every eligible target without prompts
+prf cln rust --current -y             # Alias; current-directory scoped cleanup
 ```
 
 Target behavior:
 
 - Default targets: xcode, python, rust, nodejs, brew, docker
-- Current-directory mode (`--current`) excludes brew and docker targets
-- Positional paths replace `~/Desktop` while retaining applicable home-relative discovery
-- `--type` and `--all` skip target selection for `run` but retain deletion confirmation
+- Positional target IDs are case-insensitive, deduplicated, and resolved through the registry
+- No target selects all eligible targets for `scan` and opens target selection for `clean`
+- `--all` explicitly selects all eligible targets and skips `clean` target selection
+- Default mode recursively scans `~/Desktop`, evaluates applicable home-relative paths, and includes
+  Brew and Docker
+- Current-directory mode (`-c/--current`) scans only the working directory, disables home-relative
+  discovery, and excludes Brew and Docker
+- Arbitrary path arguments are not accepted; another directory is handled by changing to it and
+  using `--current`
 - `--yes` skips deletion confirmation but does not skip otherwise-required target selection
+- Interactive selection and confirmation require terminal stdin; non-interactive cleanup specifies
+  targets or `--all` and uses `--yes`
 - Docker cleanup uses `docker system prune -a -f --volumes` and names unused images, containers,
   networks, build cache, and volumes in the deletion plan
 
@@ -41,5 +50,5 @@ Help displays via:
 ```sh
 prf --help
 prf scan --help
-prf run --help
+prf clean --help
 ```

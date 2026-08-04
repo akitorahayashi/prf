@@ -22,9 +22,6 @@ pub enum AppError {
     #[error("Invalid target registry: {0}")]
     InvalidTargetRegistry(String),
 
-    #[error("Invalid scan scope: {0}")]
-    InvalidScope(String),
-
     #[error("Discovery failed: {0}")]
     Discovery(String),
 
@@ -56,10 +53,14 @@ pub enum AppError {
     #[error("Footprint estimation failed: {0}")]
     Footprint(#[from] crate::footprint::Error),
 
-    #[error(
-        "Cannot determine the default scan root because HOME is not set. Pass a path argument or use --current."
-    )]
+    #[error("Cannot determine the default scan root because HOME is not set. Use --current.")]
     HomeUnset,
+
+    #[error("Target selection requires an interactive terminal. Specify TARGET... or --all.")]
+    TargetSelectionRequiresTerminal,
+
+    #[error("Deletion confirmation requires an interactive terminal. Pass --yes to continue.")]
+    ConfirmationRequiresTerminal,
 
     #[error("Operation cancelled by user")]
     Cancelled,

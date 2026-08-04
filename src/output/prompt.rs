@@ -1,4 +1,4 @@
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 
 use crate::cleanup::{ScanReport, Target};
 use crate::error::AppError;
@@ -9,6 +9,10 @@ pub fn prompt_for_targets<'a>(
     report: &ScanReport,
     available_targets: &[&'a Target],
 ) -> Result<Vec<&'a Target>, AppError> {
+    if !io::stdin().is_terminal() {
+        return Err(AppError::TargetSelectionRequiresTerminal);
+    }
+
     let stdout = io::stdout();
     let mut output = stdout.lock();
     writeln!(
@@ -87,6 +91,10 @@ fn push_unique<'a>(selected: &mut Vec<&'a Target>, target: &'a Target) {
 }
 
 pub fn confirm_deletion(total_size: u64) -> Result<bool, AppError> {
+    if !io::stdin().is_terminal() {
+        return Err(AppError::ConfirmationRequiresTerminal);
+    }
+
     let stdout = io::stdout();
     let mut output = stdout.lock();
     writeln!(output, "About to delete {}. Proceed? [y/N]", format_bytes(total_size))?;

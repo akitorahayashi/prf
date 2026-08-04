@@ -134,8 +134,7 @@ mod tests {
             .expect_err("/dev/null cannot contain a child path");
         assert_eq!(precondition.kind(), ErrorKind::NotADirectory);
         let scope =
-            Scope::resolve(&[PathBuf::from("/unused")], false, None, PathBuf::from("/unused"))
-                .expect("explicit scope resolves");
+            Scope::resolve(true, None, PathBuf::from("/unused")).expect("current scope resolves");
 
         list_targets_with(
             ScanOptions { targets: vec![&TARGET], scope, verbose: false },

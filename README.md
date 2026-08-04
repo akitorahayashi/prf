@@ -27,11 +27,11 @@ prf scan --list
 ### Common Commands
 
 ```bash
-prf scan --all                  # Scan every target
-prf sc --current                # Alias for scan in current-directory mode
-prf run                         # Scan, select targets, and confirm deletion
-prf rn --current --type rust -y # Alias for run with explicit deletion
-prf scan --type python -v       # Show detailed Python cleanup targets
+prf scan python rust          # Scan multiple targets under ~/Desktop
+prf sc --current             # Alias for a current-directory scan
+prf clean                    # Scan, select targets, and confirm deletion
+prf clean nodejs -y          # Clean one target without confirmation
+prf cln rust --current -y    # Alias for current-directory cleanup
 ```
 
 ### Targets
@@ -48,7 +48,7 @@ prf scan --type python -v       # Show detailed Python cleanup targets
 ### Safety Model
 
 1. Scans report estimated reclaimable allocated disk space per target.
-2. `--type <target>`, `--all`, and interactive selection constrain deletion scope.
+2. Positional targets, `--all`, and interactive selection constrain deletion scope.
 3. Destructive actions require confirmation unless `-y/--yes` is supplied.
 4. Symbolic-link cleanup removes the link entry without following its target.
 5. Partial cleanup reports completed, absent, retained, and failed actions before exiting non-zero.
@@ -58,7 +58,7 @@ prf scan --type python -v       # Show detailed Python cleanup targets
 The implementation follows explicit boundaries:
 
 - `src/cli/` parses CLI arguments and converts them into app options.
-- `src/app/` orchestrates scan and run use cases.
+- `src/app/` orchestrates scan and clean use cases.
 - `src/cleanup/` owns discovery contracts, cleanup candidates, action application, and reports.
 - `src/footprint/` owns allocated-space measurement and selection-aware estimates.
 - `src/targets/` declares supported targets and owns target-specific inspection.

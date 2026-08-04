@@ -4,17 +4,16 @@ use predicates::prelude::*;
 use std::os::unix::fs::symlink;
 
 #[test]
-fn run_type_nodejs_yes_deletes_directories() {
+fn clean_nodejs_yes_deletes_directories() {
     let ctx = TestContext::new();
-    let cache = ctx.write_home_file("workspace/node_modules/index.js", "console.log('cache');");
+    let cache =
+        ctx.write_home_file("Desktop/workspace/node_modules/index.js", "console.log('cache');");
     let cache_dir = cache.parent().expect("cache file has parent").to_path_buf();
 
     ctx.cli()
-        .arg("run")
-        .arg("--type")
+        .arg("clean")
         .arg("nodejs")
         .arg("-y")
-        .arg(ctx.home())
         .assert()
         .success()
         .stdout(predicate::str::contains("Reclaimed"));
@@ -23,7 +22,7 @@ fn run_type_nodejs_yes_deletes_directories() {
 }
 
 #[test]
-fn run_routes_docker_prune_to_system_prune_not_a_filesystem_path() {
+fn clean_routes_docker_prune_to_system_prune_not_a_filesystem_path() {
     let ctx = TestContext::new();
     let marker = ctx.work_dir().join("docker_prune_marker");
     ctx.set_env("PRF_TEST_MARKER", &marker);
@@ -46,8 +45,7 @@ exit 0
     );
 
     ctx.cli()
-        .arg("run")
-        .arg("--type")
+        .arg("clean")
         .arg("docker")
         .arg("-y")
         .assert()
@@ -66,7 +64,7 @@ exit 0
 }
 
 #[test]
-fn run_does_not_prune_docker_without_a_scanned_candidate() {
+fn clean_does_not_prune_docker_without_a_scanned_candidate() {
     let ctx = TestContext::new();
     let marker = ctx.work_dir().join("docker_prune_marker");
     ctx.set_env("PRF_TEST_MARKER", &marker);
@@ -89,8 +87,7 @@ exit 0
     );
 
     ctx.cli()
-        .arg("run")
-        .arg("--type")
+        .arg("clean")
         .arg("docker")
         .arg("-y")
         .assert()
@@ -101,7 +98,7 @@ exit 0
 }
 
 #[test]
-fn run_reports_docker_process_failure() {
+fn clean_reports_docker_process_failure() {
     let ctx = TestContext::new();
     ctx.create_mock_command(
         "docker",
@@ -121,8 +118,7 @@ exit 0
     );
 
     ctx.cli()
-        .arg("run")
-        .arg("--type")
+        .arg("clean")
         .arg("docker")
         .arg("-y")
         .assert()
@@ -136,22 +132,20 @@ exit 0
 
 #[cfg(unix)]
 #[test]
-fn run_removes_a_swiftpm_link_without_touching_its_target() {
+fn clean_removes_a_swiftpm_link_without_touching_its_target() {
     let ctx = TestContext::new();
-    ctx.write_home_file("workspace/Package.swift", "// package");
+    ctx.write_home_file("Desktop/workspace/Package.swift", "// package");
     let outside = ctx.work_dir().join("outside");
     std::fs::create_dir_all(&outside).expect("outside directory exists");
     let sentinel = outside.join("sentinel.txt");
     std::fs::write(&sentinel, "preserve").expect("sentinel exists");
-    let link = ctx.home().join("workspace/.build");
+    let link = ctx.home().join("Desktop/workspace/.build");
     symlink(&outside, &link).expect("cache-shaped link exists");
 
     ctx.cli()
-        .arg("run")
-        .arg("--type")
+        .arg("clean")
         .arg("xcode")
         .arg("-y")
-        .arg(ctx.home())
         .assert()
         .success()
         .stdout(predicate::str::contains("1 completed"));
@@ -165,9 +159,9 @@ fn run_removes_a_swiftpm_link_without_touching_its_target() {
 }
 
 #[test]
-fn run_reports_successful_mutation_before_a_later_process_failure() {
+fn clean_accepts_multiple_targets_and_reports_a_later_process_failure() {
     let ctx = TestContext::new();
-    let cache = ctx.write_home_file("workspace/node_modules/index.js", "cache");
+    let cache = ctx.write_home_file("Desktop/workspace/node_modules/index.js", "cache");
     let cache_dir = cache.parent().expect("cache file has parent").to_path_buf();
     ctx.create_mock_command(
         "docker",
@@ -187,13 +181,10 @@ exit 0
     );
 
     ctx.cli()
-        .arg("run")
-        .arg("--type")
+        .arg("clean")
         .arg("nodejs")
-        .arg("--type")
         .arg("docker")
         .arg("-y")
-        .arg(ctx.home())
         .assert()
         .failure()
         .stdout(predicate::str::contains("1 completed"))
@@ -204,7 +195,7 @@ exit 0
 }
 
 #[test]
-fn run_reports_a_process_that_disappears_after_discovery() {
+fn clean_reports_a_process_that_disappears_after_discovery() {
     let ctx = TestContext::new();
     ctx.create_mock_command(
         "docker",
@@ -222,8 +213,7 @@ exit 0
     );
 
     ctx.cli()
-        .arg("run")
-        .arg("--type")
+        .arg("clean")
         .arg("docker")
         .arg("-y")
         .assert()
@@ -234,19 +224,60 @@ exit 0
 }
 
 #[test]
-fn run_interactive_accepts_selection() {
+fn clean_without_targets_requires_a_terminal_when_candidates_exist() {
     let ctx = TestContext::new();
-    let cache = ctx.write_home_file("workspace/__pycache__/foo.pyc", "cache");
+    let cache = ctx.write_home_file("Desktop/workspace/__pycache__/foo.pyc", "cache");
     let cache_dir = cache.parent().expect("cache file has parent").to_path_buf();
 
     ctx.cli()
-        .arg("run")
-        .arg(ctx.home())
-        .write_stdin("python\ny\n")
+        .arg("clean")
+        .arg("-y")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Target selection requires an interactive terminal"))
+        .stderr(predicate::str::contains("TARGET... or --all"));
+
+    assert!(cache_dir.exists(), "cache directory must remain without a target decision");
+}
+
+#[test]
+fn clean_all_yes_skips_both_prompts() {
+    let ctx = TestContext::new();
+    let cache = ctx.write_home_file("Desktop/workspace/__pycache__/foo.pyc", "cache");
+    let cache_dir = cache.parent().expect("cache file has parent").to_path_buf();
+
+    ctx.cli()
+        .arg("clean")
+        .arg("--all")
+        .arg("-y")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Deletion plan"))
         .stdout(predicate::str::contains("Reclaimed"));
 
-    assert!(!cache_dir.exists(), "cache directory should be deleted");
+    assert!(!cache_dir.exists(), "explicit all with yes should apply without terminal input");
+}
+
+#[test]
+fn clean_rejects_named_targets_with_all() {
+    let ctx = TestContext::new();
+
+    ctx.cli()
+        .arg("clean")
+        .arg("python")
+        .arg("--all")
+        .arg("-y")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with '--all'"));
+}
+
+#[test]
+fn clean_without_targets_or_candidates_succeeds_without_a_terminal() {
+    let ctx = TestContext::new();
+
+    ctx.cli()
+        .arg("clean")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No cleanup actions were discovered"));
 }

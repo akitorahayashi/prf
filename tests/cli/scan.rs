@@ -8,19 +8,17 @@ use std::os::unix::fs::MetadataExt;
 #[test]
 fn scan_python_verbose_lists_targets() {
     let ctx = TestContext::new();
-    ctx.write_home_file("project/__pycache__/foo.pyc", "cache");
+    ctx.write_home_file("Desktop/project/__pycache__/foo.pyc", "cache");
 
     ctx.cli()
         .arg("scan")
-        .arg("--type")
         .arg("PYTHON")
         .arg("--verbose")
-        .arg(ctx.home())
         .assert()
         .success()
         .stdout(predicate::str::contains("Scan results"))
         .stdout(predicate::str::contains("Python"))
-        .stdout(predicate::str::contains("~/project/__pycache__"));
+        .stdout(predicate::str::contains("~/Desktop/project/__pycache__"));
 }
 
 #[test]
@@ -30,7 +28,6 @@ fn scan_list_prints_target_listing() {
     ctx.cli()
         .arg("scan")
         .arg("--list")
-        .arg(ctx.home())
         .assert()
         .success()
         .stdout(predicate::str::contains("Found cleanup targets"))
@@ -57,7 +54,6 @@ exit 0
 
     ctx.cli()
         .arg("scan")
-        .arg("--type")
         .arg("docker")
         .assert()
         .success()
@@ -81,7 +77,6 @@ exit 0
     ctx.cli()
         .arg("scan")
         .arg("--list")
-        .arg(ctx.home())
         .assert()
         .success()
         .stdout(predicate::str::contains("Docker"))
@@ -95,7 +90,6 @@ fn scan_reports_missing_docker_as_a_diagnostic() {
 
     ctx.cli()
         .arg("scan")
-        .arg("--type")
         .arg("docker")
         .assert()
         .success()
@@ -109,7 +103,6 @@ fn scan_requires_home_only_for_the_default_root() {
     ctx.cli()
         .env_remove("HOME")
         .arg("scan")
-        .arg("--type")
         .arg("python")
         .assert()
         .failure()
@@ -117,14 +110,33 @@ fn scan_requires_home_only_for_the_default_root() {
 }
 
 #[test]
-fn explicit_roots_work_without_home_and_report_home_discovery_once() {
+fn current_scope_works_without_home() {
     let ctx = TestContext::new();
     let root = ctx.work_dir().join("workspace");
-    std::fs::create_dir_all(&root).expect("explicit root exists");
+    std::fs::create_dir_all(root.join("__pycache__")).expect("cache directory exists");
 
-    ctx.cli().env_remove("HOME").arg("scan").arg("--list").arg(&root).assert().success().stderr(
-        predicate::str::contains("Home directory is unavailable for global discovery").count(1),
-    );
+    ctx.cli_in(&root)
+        .env_remove("HOME")
+        .arg("scan")
+        .arg("python")
+        .arg("--current")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Python"))
+        .stderr(predicate::str::contains("Home directory is unavailable").not());
+}
+
+#[test]
+fn scan_rejects_a_path_argument() {
+    let ctx = TestContext::new();
+
+    ctx.cli()
+        .arg("scan")
+        .arg(ctx.home())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid value"))
+        .stderr(predicate::str::contains("possible values"));
 }
 
 #[test]
@@ -146,7 +158,6 @@ exit 0
 
     ctx.cli()
         .arg("scan")
-        .arg("--type")
         .arg("docker")
         .assert()
         .failure()
@@ -161,7 +172,7 @@ fn scan_reports_allocated_footprint_for_sparse_files() {
     use std::fs::File;
 
     let ctx = TestContext::new();
-    let cache = ctx.create_home_dir("workspace/node_modules");
+    let cache = ctx.create_home_dir("Desktop/workspace/node_modules");
     let sparse = cache.join("sparse.bin");
     File::create(&sparse)
         .expect("sparse file is created")
@@ -178,10 +189,8 @@ fn scan_reports_allocated_footprint_for_sparse_files() {
 
     ctx.cli()
         .arg("scan")
-        .arg("--type")
         .arg("nodejs")
         .arg("--verbose")
-        .arg(ctx.home())
         .assert()
         .success()
         .stdout(predicate::str::contains(expected))
