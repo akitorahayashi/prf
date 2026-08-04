@@ -86,7 +86,8 @@ pub fn scan_targets(
     footprint_spinner.enable_steady_tick(Duration::from_millis(100));
     footprint_spinner.set_message(messages::calculating_footprint(total_items));
     let measurement = (|| {
-        let catalog = RemovalCatalog::new(candidates, &inputs.protected_paths())?;
+        let protected_paths = inputs.protected_paths()?;
+        let catalog = RemovalCatalog::new(candidates, &protected_paths)?;
         let footprint = Index::measure(&catalog.measurement_roots())?;
         Ok::<_, AppError>((catalog, footprint))
     })();

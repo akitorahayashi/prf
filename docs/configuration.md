@@ -32,8 +32,10 @@ Environment-derived paths are captured once before target resolution and inspect
 - pnpm's effective configuration is resolved by `pnpm store path --silent`, and that scanned path
   is bound to the later prune action
 
-Invalid configured paths and malformed Bun configuration are discovery failures. Dynamic cache
-paths cannot contain HOME, the scan root, the working directory, or the process temporary root.
+Empty or relative XDG base-directory values are treated as unset. Other invalid configured paths
+and malformed Bun configuration are discovery failures. Dynamic cache paths cannot contain HOME,
+the scan root, the working directory, or the process temporary root, including their canonical
+filesystem locations.
 
 ## CI/CD Contract
 

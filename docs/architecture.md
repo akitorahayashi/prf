@@ -106,7 +106,8 @@ mutually exclusive.
 scope with an immutable snapshot of HOME, the working and temporary directories, XDG paths, and
 supported tool cache overrides. CLI resolution captures these inputs once before target selection
 and inspection. Default scope always uses `~/Desktop` as its recursive root and evaluates
-applicable home-relative rules. An unavailable `HOME` makes default scope invalid.
+applicable home-relative rules. Empty and relative XDG base-directory values are treated as unset.
+An unavailable `HOME` makes default scope invalid.
 
 Current scope uses the captured working directory as its only root, does not require `HOME`, disables
 home-relative discovery, and rejects default-only targets. The CLI accepts no arbitrary scan-root
@@ -127,10 +128,10 @@ candidate. Malformed configuration and unsafe dynamic paths are discovery errors
 fallbacks.
 
 pnpm queries `pnpm store path --silent`; an unavailable CLI produces a diagnostic, while failed,
-empty, relative, or malformed output is a discovery error. An existing store creates one
-unestimated process candidate whose owned argument vector fixes the scanned store for
-`pnpm store prune`. Docker queries daemon availability and structured disk-usage output; a positive
-reclaimable total creates one known-estimate process candidate for
+empty, relative, or malformed output is a discovery error. The reported store path resolves to an
+existing directory and passes protected-path validation before its canonical path is bound to one
+unestimated `pnpm store prune` process candidate. Docker queries daemon availability and structured
+disk-usage output; a positive reclaimable total creates one known-estimate process candidate for
 `docker system prune -a -f --volumes`.
 
 ## Action Model
@@ -148,11 +149,12 @@ no target-specific execution branches.
 
 ## Removal Planning
 
-The removal catalog owns the scanned candidate set, validates paths against captured protected
-roots, canonicalizes candidate parents after discovery, merges physical ancestor aliases, rejects
-conflicting entry kinds, and retains the terminal path component. Relative, parent-containing,
-overly broad, and protected-root ancestor paths are rejected. A removal plan selects catalog roots
-for a report subset and omits roots already covered by a selected ancestor. Plan construction
+The removal catalog owns the scanned candidate set, validates paths against the lexical and
+canonical forms of captured protected roots, canonicalizes candidate parents after discovery,
+merges physical ancestor aliases, rejects conflicting entry kinds, and retains the terminal path
+component. Relative, parent-containing, overly broad, and protected-root ancestor paths are
+rejected. A removal plan selects catalog roots for a report subset and omits roots already covered
+by a selected ancestor. Plan construction
 accepts only candidate indices, so a different candidate collection cannot be paired with catalog
 normalization state. Component-aware path sorting followed by one prefix pass selects maximal roots
 and their attribution in `O(n log n)` time including sorting.

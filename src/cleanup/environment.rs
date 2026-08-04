@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
@@ -19,8 +20,8 @@ impl EnvironmentPaths {
             home: std::env::var_os("HOME").map(PathBuf::from),
             working_directory: std::env::current_dir()?,
             temporary_directory: std::env::temp_dir(),
-            xdg_cache_home: std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from),
-            xdg_config_home: std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+            xdg_cache_home: xdg_path(std::env::var_os("XDG_CACHE_HOME")),
+            xdg_config_home: xdg_path(std::env::var_os("XDG_CONFIG_HOME")),
             mise_cache_dir: std::env::var_os("MISE_CACHE_DIR").map(PathBuf::from),
             bun_install_cache_dir: std::env::var_os("BUN_INSTALL_CACHE_DIR").map(PathBuf::from),
         })
@@ -65,5 +66,24 @@ impl EnvironmentPaths {
             mise_cache_dir: None,
             bun_install_cache_dir: None,
         }
+    }
+}
+
+fn xdg_path(value: Option<OsString>) -> Option<PathBuf> {
+    value.map(PathBuf::from).filter(|path| path.is_absolute())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xdg_paths_ignore_empty_and_relative_values() {
+        let absolute = std::env::temp_dir().join("prf-xdg");
+
+        assert_eq!(xdg_path(None), None);
+        assert_eq!(xdg_path(Some(OsString::new())), None);
+        assert_eq!(xdg_path(Some(OsString::from("relative/cache"))), None);
+        assert_eq!(xdg_path(Some(absolute.clone().into_os_string())), Some(absolute));
     }
 }

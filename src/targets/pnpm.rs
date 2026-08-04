@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::process::Command;
@@ -41,17 +42,34 @@ fn inspect(target: TargetId, inputs: &InspectionInputs) -> Result<Inspection, Ap
     })?;
     let path = parse_store_path(&stdout)?;
     inputs.validate_external_cache_path(&path)?;
-    let metadata = match path.symlink_metadata() {
-        Ok(metadata) => metadata,
+    match path.symlink_metadata() {
+        Ok(_) => {}
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Inspection::default()),
-        Err(error) => return Err(AppError::Io(error)),
-    };
-    if !metadata.is_dir() && !metadata.file_type().is_symlink() {
+        Err(source) => {
+            return Err(AppError::PathOperation {
+                operation: "inspect pnpm store path",
+                path,
+                source,
+            });
+        }
+    }
+    let path = fs::canonicalize(&path).map_err(|source| AppError::PathOperation {
+        operation: "resolve pnpm store path",
+        path: path.clone(),
+        source,
+    })?;
+    let metadata = fs::metadata(&path).map_err(|source| AppError::PathOperation {
+        operation: "inspect resolved pnpm store path",
+        path: path.clone(),
+        source,
+    })?;
+    if !metadata.is_dir() {
         return Err(AppError::Discovery(format!(
             "pnpm store path is not a directory: {}",
             path.display()
         )));
     }
+    inputs.validate_external_cache_path(&path)?;
 
     let mut store_argument = OsString::from("--store-dir=");
     store_argument.push(path.as_os_str());

@@ -46,18 +46,38 @@ impl InspectionInputs {
         &self.environment
     }
 
-    pub fn protected_paths(&self) -> Vec<PathBuf> {
-        let mut paths = self.scope.roots().to_vec();
-        paths.push(self.environment.working_directory().to_path_buf());
-        paths.push(self.environment.temporary_directory().to_path_buf());
+    pub fn protected_paths(&self) -> Result<Vec<PathBuf>, AppError> {
+        let mut lexical_paths = self.scope.roots().to_vec();
+        lexical_paths.push(self.environment.working_directory().to_path_buf());
+        lexical_paths.push(self.environment.temporary_directory().to_path_buf());
         if let Some(home) = self.environment.home() {
-            paths.push(home.to_path_buf());
+            lexical_paths.push(home.to_path_buf());
         }
-        paths
+
+        let mut paths = Vec::new();
+        for path in lexical_paths {
+            if !paths.contains(&path) {
+                paths.push(path.clone());
+            }
+            match path.canonicalize() {
+                Ok(canonical) if !paths.contains(&canonical) => paths.push(canonical),
+                Ok(_) => {}
+                Err(error) if error.kind() == ErrorKind::NotFound => {}
+                Err(source) => {
+                    return Err(AppError::PathOperation {
+                        operation: "resolve protected path",
+                        path,
+                        source,
+                    });
+                }
+            }
+        }
+        Ok(paths)
     }
 
     pub fn validate_external_cache_path(&self, path: &Path) -> Result<(), AppError> {
-        validate_removal_path(path, &self.protected_paths()).map_err(AppError::Discovery)
+        let protected_paths = self.protected_paths()?;
+        validate_removal_path(path, &protected_paths).map_err(AppError::Discovery)
     }
 
     #[cfg(test)]
