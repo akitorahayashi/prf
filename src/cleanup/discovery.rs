@@ -1,20 +1,91 @@
 use std::collections::{BTreeMap, HashSet};
 use std::io::ErrorKind;
-#[cfg(test)]
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use walkdir::WalkDir;
 
 use crate::error::AppError;
 
 use super::candidate::Candidate;
+use super::environment::EnvironmentPaths;
+use super::removal_path::validate_removal_path;
 use super::scope::Scope;
 use super::target::TargetId;
 
 const MAX_SCAN_DEPTH: usize = 10;
 
-pub type InspectFn = fn(TargetId, &Scope) -> Result<Inspection, AppError>;
+pub type InspectFn = fn(TargetId, &InspectionInputs) -> Result<Inspection, AppError>;
+
+#[derive(Debug, Clone)]
+pub struct InspectionInputs {
+    scope: Scope,
+    environment: EnvironmentPaths,
+}
+
+impl InspectionInputs {
+    pub fn from_environment(current: bool) -> Result<Self, AppError> {
+        let environment = EnvironmentPaths::capture()?;
+        let scope = Scope::resolve(
+            current,
+            environment.home().map(Path::to_path_buf),
+            environment.working_directory().to_path_buf(),
+        )?;
+        Ok(Self { scope, environment })
+    }
+
+    #[cfg(test)]
+    pub const fn new(scope: Scope, environment: EnvironmentPaths) -> Self {
+        Self { scope, environment }
+    }
+
+    pub const fn scope(&self) -> &Scope {
+        &self.scope
+    }
+
+    pub const fn environment(&self) -> &EnvironmentPaths {
+        &self.environment
+    }
+
+    pub fn protected_paths(&self) -> Result<Vec<PathBuf>, AppError> {
+        let mut lexical_paths = self.scope.roots().to_vec();
+        lexical_paths.push(self.environment.working_directory().to_path_buf());
+        lexical_paths.push(self.environment.temporary_directory().to_path_buf());
+        if let Some(home) = self.environment.home() {
+            lexical_paths.push(home.to_path_buf());
+        }
+
+        let mut paths = Vec::new();
+        for path in lexical_paths {
+            if !paths.contains(&path) {
+                paths.push(path.clone());
+            }
+            match path.canonicalize() {
+                Ok(canonical) if !paths.contains(&canonical) => paths.push(canonical),
+                Ok(_) => {}
+                Err(error) if error.kind() == ErrorKind::NotFound => {}
+                Err(source) => {
+                    return Err(AppError::PathOperation {
+                        operation: "resolve protected path",
+                        path,
+                        source,
+                    });
+                }
+            }
+        }
+        Ok(paths)
+    }
+
+    pub fn validate_external_cache_path(&self, path: &Path) -> Result<(), AppError> {
+        let protected_paths = self.protected_paths()?;
+        validate_removal_path(path, &protected_paths).map_err(AppError::Discovery)
+    }
+
+    #[cfg(test)]
+    pub fn for_test(scope: Scope) -> Self {
+        let working_directory = scope.roots()[0].clone();
+        Self::new(scope, EnvironmentPaths::for_test(working_directory))
+    }
+}
 
 #[derive(Clone, Copy)]
 pub enum Discovery {
@@ -23,10 +94,14 @@ pub enum Discovery {
 }
 
 impl Discovery {
-    pub fn inspect(self, target: TargetId, scope: &Scope) -> Result<Inspection, AppError> {
+    pub fn inspect(
+        self,
+        target: TargetId,
+        inputs: &InspectionInputs,
+    ) -> Result<Inspection, AppError> {
         match self {
-            Self::Rules(rules) => inspect_rules(target, scope, rules),
-            Self::Inspector(inspect) => inspect(target, scope),
+            Self::Rules(rules) => inspect_rules(target, inputs.scope(), rules),
+            Self::Inspector(inspect) => inspect(target, inputs),
         }
     }
 }
@@ -74,6 +149,22 @@ impl Inspection {
             diagnostics: vec![Diagnostic { message: message.into() }],
         }
     }
+}
+
+pub(crate) fn inspect_path(target: TargetId, path: PathBuf) -> Inspection {
+    let mut inspection = Inspection::default();
+    let mut candidate_paths = HashSet::new();
+    match path.symlink_metadata() {
+        Ok(_) => {
+            inspection.listings.push(Listing::Path(path.clone()));
+            add_existing_path(target, path, &mut inspection, &mut candidate_paths);
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => inspection.diagnostics.push(Diagnostic {
+            message: format!("Unable to inspect cleanup entry {}: {error}", path.display()),
+        }),
+    }
+    inspection
 }
 
 fn inspect_rules(

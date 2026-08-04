@@ -3,13 +3,16 @@ use std::collections::HashSet;
 use crate::cleanup::{ScopeMode, Target, TargetId};
 use crate::error::AppError;
 
-use super::{brew, docker, nodejs, python, rust, xcode};
+use super::{brew, bun, docker, mise, nodejs, pnpm, python, rust, xcode};
 
-static TARGETS: [&Target; 6] = [
+static TARGETS: [&Target; 9] = [
     &xcode::TARGET,
     &python::TARGET,
     &rust::TARGET,
     &nodejs::TARGET,
+    &mise::TARGET,
+    &bun::TARGET,
+    &pnpm::TARGET,
     &brew::TARGET,
     &docker::TARGET,
 ];

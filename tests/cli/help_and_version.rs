@@ -36,14 +36,14 @@ fn scan_help_explains_every_input() {
         .success()
         .stdout(predicate::str::contains("[TARGET]..."))
         .stdout(predicate::str::contains(
-            "possible values: xcode, python, rust, nodejs, brew, docker",
+            "possible values: xcode, python, rust, nodejs, mise, bun, pnpm, brew, docker",
         ))
         .stdout(predicate::str::contains("--all"))
         .stdout(predicate::str::contains("--verbose"))
         .stdout(predicate::str::contains("--list"))
         .stdout(predicate::str::contains("--current"))
         .stdout(predicate::str::contains("without measuring"))
-        .stdout(predicate::str::contains("disable home discovery, Brew, and Docker"));
+        .stdout(predicate::str::contains("disable home discovery and default-only targets"));
 }
 
 #[test]

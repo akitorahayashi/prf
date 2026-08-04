@@ -15,12 +15,6 @@ pub enum Scope {
 }
 
 impl Scope {
-    pub fn from_environment(current: bool) -> Result<Self, AppError> {
-        let home = std::env::var_os("HOME").map(PathBuf::from);
-        let working_directory = std::env::current_dir()?;
-        Self::resolve(current, home, working_directory)
-    }
-
     pub fn resolve(
         current: bool,
         home: Option<PathBuf>,

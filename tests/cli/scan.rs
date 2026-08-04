@@ -22,6 +22,96 @@ fn scan_python_verbose_lists_targets() {
 }
 
 #[test]
+fn scan_mise_reports_the_global_cache() {
+    let ctx = TestContext::new();
+    ctx.write_home_file("Library/Caches/mise/node/versions.msgpack", "cache");
+
+    ctx.cli()
+        .arg("scan")
+        .arg("mise")
+        .arg("--verbose")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("mise"))
+        .stdout(predicate::str::contains("~/Library/Caches/mise"));
+}
+
+#[test]
+fn scan_bun_honors_the_global_cache_configuration() {
+    let ctx = TestContext::new();
+    ctx.write_home_file(".bunfig.toml", "[install.cache]\ndir = '~/Library/Caches/custom-bun'\n");
+    ctx.write_home_file("Library/Caches/custom-bun/pkg@1.0.0/index.js", "cache");
+
+    ctx.cli()
+        .arg("scan")
+        .arg("bun")
+        .arg("--verbose")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Bun"))
+        .stdout(predicate::str::contains("~/Library/Caches/custom-bun"));
+}
+
+#[test]
+fn scan_rejects_a_malformed_global_bun_config() {
+    let ctx = TestContext::new();
+    ctx.write_home_file(".bunfig.toml", "[install.cache\n");
+
+    ctx.cli()
+        .arg("scan")
+        .arg("bun")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid Bun config"));
+}
+
+#[test]
+fn scan_reports_pnpm_prune_without_running_it_or_inventing_an_estimate() {
+    let ctx = TestContext::new();
+    let marker = ctx.work_dir().join("pnpm_prune_marker");
+    ctx.set_env("PRF_TEST_MARKER", &marker);
+    ctx.create_home_dir("Library/pnpm/store/v11");
+    ctx.create_mock_command(
+        "pnpm",
+        r#"#!/bin/sh
+if [ "$1" = "store" ] && [ "$2" = "path" ]; then
+  echo "$HOME/Library/pnpm/store/v11"
+  exit 0
+fi
+if [ "$2" = "store" ] && [ "$3" = "prune" ]; then
+  echo "$@" > "$PRF_TEST_MARKER"
+  exit 0
+fi
+exit 9
+"#,
+    );
+
+    ctx.cli()
+        .arg("scan")
+        .arg("pnpm")
+        .arg("--verbose")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("pnpm"))
+        .stdout(predicate::str::contains("pnpm store prune"))
+        .stdout(predicate::str::contains("unknown (1 unestimated action)"));
+
+    assert!(!marker.exists(), "scan must not prune the pnpm store");
+}
+
+#[test]
+fn scan_reports_missing_pnpm_as_a_diagnostic() {
+    let ctx = TestContext::new();
+
+    ctx.cli()
+        .arg("scan")
+        .arg("pnpm")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("pnpm CLI is unavailable"));
+}
+
+#[test]
 fn scan_list_prints_target_listing() {
     let ctx = TestContext::new();
 

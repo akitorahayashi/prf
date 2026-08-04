@@ -22,14 +22,14 @@ prf cln rust --current -y             # Alias; current-directory scoped cleanup
 
 Target behavior:
 
-- Default targets: xcode, python, rust, nodejs, brew, docker
+- Default targets: xcode, python, rust, nodejs, mise, bun, pnpm, brew, docker
 - Positional target IDs are case-insensitive, deduplicated, and resolved through the registry
 - No target selects all eligible targets for `scan` and opens target selection for `clean`
 - `--all` explicitly selects all eligible targets and skips `clean` target selection
 - Default mode recursively scans `~/Desktop`, evaluates applicable home-relative paths, and includes
-  Brew and Docker
+  user-level and system-level targets
 - Current-directory mode (`-c/--current`) scans only the working directory, disables home-relative
-  discovery, and excludes Brew and Docker
+  discovery, and excludes mise, Bun, pnpm, Brew, and Docker
 - Arbitrary path arguments are not accepted; another directory is handled by changing to it and
   using `--current`
 - `--yes` skips deletion confirmation but does not skip otherwise-required target selection
@@ -37,13 +37,21 @@ Target behavior:
   targets or `--all` and uses `--yes`
 - Docker cleanup uses `docker system prune -a -f --volumes` and names unused images, containers,
   networks, build cache, and volumes in the deletion plan
+- mise cleanup removes the resolved global cache directory without removing installed tools,
+  plugins, state, or configuration
+- Bun cleanup removes the resolved global package cache and optional global virtual store; projects
+  linked to that store require `bun install` before reuse
+- pnpm cleanup binds the store returned by `pnpm store path --silent` into the confirmed process
+  action and executes `pnpm store prune` without deleting the complete store
 
 Filesystem scan values estimate allocated disk space released by the selected removal roots. Sparse
 files use allocated blocks, hard-linked files contribute only when every link is selected, and
 symbolic-link candidates and links inside a removal tree are never followed. Docker values remain
-estimates reported by Docker. APFS clones, snapshots, concurrent filesystem changes, and failed
-removals can make the eventual released space differ from the scan estimate. A cleanup with retained
-or failed actions renders its partial outcome and exits unsuccessfully.
+estimates reported by Docker. pnpm store pruning is shown as unestimated because pnpm has no
+non-destructive prune-size command; known bytes and unestimated actions remain separate in scan,
+confirmation, and cleanup output. APFS clones, snapshots, concurrent filesystem changes, and failed
+removals can make the eventual released space differ from the scan estimate. A cleanup with
+retained or failed actions renders its partial outcome and exits unsuccessfully.
 
 Help displays via:
 

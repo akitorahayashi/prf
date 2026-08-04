@@ -1,12 +1,14 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
 use crate::footprint::{Estimate, Root, RootId};
 
-use super::{Action, Candidate, EntryKind};
+use super::removal_path::validate_removal_path;
+use super::{Action, ActionEstimate, Candidate, EntryKind};
 
 #[derive(Debug, Clone)]
 struct CatalogRoot {
@@ -23,7 +25,7 @@ pub struct RemovalCatalog {
 }
 
 impl RemovalCatalog {
-    pub fn new(candidates: Vec<Candidate>) -> Result<Self, AppError> {
+    pub fn new(candidates: Vec<Candidate>, protected_paths: &[PathBuf]) -> Result<Self, AppError> {
         let mut roots: Vec<CatalogRoot> = Vec::new();
         let mut roots_by_path: HashMap<PathBuf, usize> = HashMap::new();
         let mut candidate_roots = Vec::with_capacity(candidates.len());
@@ -31,7 +33,9 @@ impl RemovalCatalog {
         for candidate in &candidates {
             match candidate.action() {
                 Action::RemovePath { path, kind } => {
+                    validate_removal_path(path, protected_paths).map_err(AppError::Cleanup)?;
                     let resolved = normalize_terminal_entry(path)?;
+                    validate_removal_path(&resolved, protected_paths).map_err(AppError::Cleanup)?;
 
                     if let Some(index) = roots_by_path.get(&resolved).copied() {
                         if roots[index].kind != *kind {
@@ -112,10 +116,9 @@ impl RemovalCatalog {
             match candidate.action() {
                 Action::RunProcess { label, program, args, estimate } => {
                     processes.push(ProcessRemoval {
-                        candidate: index,
-                        label,
-                        program,
-                        args,
+                        label: label.clone(),
+                        program: program.clone(),
+                        args: args.clone(),
                         estimate: *estimate,
                     })
                 }
@@ -178,31 +181,26 @@ impl PathRemoval {
 
 #[derive(Debug, Clone)]
 pub struct ProcessRemoval {
-    candidate: usize,
-    label: &'static str,
-    program: &'static str,
-    args: &'static [&'static str],
-    estimate: Estimate,
+    label: String,
+    program: String,
+    args: Vec<OsString>,
+    estimate: ActionEstimate,
 }
 
 impl ProcessRemoval {
-    pub const fn candidate(&self) -> usize {
-        self.candidate
+    pub fn label(&self) -> &str {
+        &self.label
     }
 
-    pub const fn label(&self) -> &'static str {
-        self.label
+    pub fn program(&self) -> &str {
+        &self.program
     }
 
-    pub const fn program(&self) -> &'static str {
-        self.program
+    pub fn args(&self) -> &[OsString] {
+        &self.args
     }
 
-    pub const fn args(&self) -> &'static [&'static str] {
-        self.args
-    }
-
-    pub const fn estimate(&self) -> Estimate {
+    pub const fn estimate(&self) -> ActionEstimate {
         self.estimate
     }
 }
@@ -231,7 +229,14 @@ impl RemovalPlan {
     }
 
     pub fn reported(&self) -> impl Iterator<Item = Estimate> + '_ {
-        self.processes.iter().map(ProcessRemoval::estimate)
+        self.processes.iter().filter_map(|process| process.estimate().known())
+    }
+
+    pub fn unestimated_action_count(&self) -> usize {
+        self.processes
+            .iter()
+            .filter(|process| process.estimate() == ActionEstimate::Unestimated)
+            .count()
     }
 }
 
@@ -262,7 +267,7 @@ mod tests {
             Candidate::directory(TARGET, alias.path().join("child")),
             Candidate::directory(TARGET, child.path().to_path_buf()),
         ];
-        let catalog = RemovalCatalog::new(candidates).expect("catalog is valid");
+        let catalog = RemovalCatalog::new(candidates, &[]).expect("catalog is valid");
 
         let plan = catalog.plan(&[0, 1, 2, 3]).expect("plan is built");
 
@@ -282,7 +287,7 @@ mod tests {
         let link = temp.child("cache-link");
         symlink(outside.path(), link.path()).expect("link exists");
         let catalog =
-            RemovalCatalog::new(vec![Candidate::symlink(TARGET, link.path().to_path_buf())])
+            RemovalCatalog::new(vec![Candidate::symlink(TARGET, link.path().to_path_buf())], &[])
                 .expect("catalog is valid");
 
         let plan = catalog.plan(&[0]).expect("plan is built");
@@ -305,8 +310,21 @@ mod tests {
         ];
 
         assert!(matches!(
-            RemovalCatalog::new(candidates),
+            RemovalCatalog::new(candidates, &[]),
             Err(AppError::Cleanup(message)) if message.contains("conflicting entry kinds")
+        ));
+    }
+
+    #[test]
+    fn catalog_rejects_a_candidate_that_contains_a_protected_root() {
+        let temp = TempDir::new().expect("temp directory is created");
+        let protected = temp.child("Desktop/project");
+        protected.create_dir_all().expect("protected root exists");
+        let candidates = vec![Candidate::directory(TARGET, temp.path().to_path_buf())];
+
+        assert!(matches!(
+            RemovalCatalog::new(candidates, &[protected.path().to_path_buf()]),
+            Err(AppError::Cleanup(message)) if message.contains("contains protected path")
         ));
     }
 
@@ -315,7 +333,7 @@ mod tests {
         let temp = TempDir::new().expect("temp directory is created");
         let missing = temp.path().join("missing");
         let candidates = vec![Candidate::directory(TARGET, missing.clone())];
-        let catalog = RemovalCatalog::new(candidates).expect("catalog is valid");
+        let catalog = RemovalCatalog::new(candidates, &[]).expect("catalog is valid");
 
         let plan = catalog.plan(&[0]).expect("plan is built");
 
@@ -362,7 +380,7 @@ mod tests {
             Candidate::directory(TARGET, adjacent.path().to_path_buf()),
             Candidate::directory(TARGET, other.path().to_path_buf()),
         ];
-        let catalog = RemovalCatalog::new(candidates).expect("catalog is valid");
+        let catalog = RemovalCatalog::new(candidates, &[]).expect("catalog is valid");
 
         for mask in 0..(1usize << catalog.candidates.len()) {
             let selected = (0..catalog.candidates.len())

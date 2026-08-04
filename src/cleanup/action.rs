@@ -1,6 +1,7 @@
+use std::ffi::OsString;
 use std::path::PathBuf;
 
-use crate::footprint::Estimate;
+use super::estimate::ActionEstimate;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryKind {
@@ -11,14 +12,6 @@ pub enum EntryKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
-    RemovePath {
-        path: PathBuf,
-        kind: EntryKind,
-    },
-    RunProcess {
-        label: &'static str,
-        program: &'static str,
-        args: &'static [&'static str],
-        estimate: Estimate,
-    },
+    RemovePath { path: PathBuf, kind: EntryKind },
+    RunProcess { label: String, program: String, args: Vec<OsString>, estimate: ActionEstimate },
 }

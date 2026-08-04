@@ -1,10 +1,12 @@
+use std::ffi::OsString;
 use std::io::ErrorKind;
 use std::process::Command;
 
 use byte_unit::Byte;
 
 use crate::cleanup::{
-    Candidate, Discovery, Inspection, Listing, Scope, ScopeSupport, Target, TargetId,
+    ActionEstimate, Candidate, Discovery, Inspection, InspectionInputs, Listing, ScopeSupport,
+    Target, TargetId,
 };
 use crate::error::AppError;
 
@@ -21,7 +23,7 @@ pub(super) static TARGET: Target = Target::new(
     Discovery::Inspector(inspect),
 );
 
-fn inspect(target: TargetId, _scope: &Scope) -> Result<Inspection, AppError> {
+fn inspect(target: TargetId, _inputs: &InspectionInputs) -> Result<Inspection, AppError> {
     let availability = match Command::new("docker").arg("info").output() {
         Ok(output) => output,
         Err(error) if error.kind() == ErrorKind::NotFound => {
@@ -59,7 +61,13 @@ fn inspect(target: TargetId, _scope: &Scope) -> Result<Inspection, AppError> {
     let candidates = if reclaimable == 0 {
         Vec::new()
     } else {
-        vec![Candidate::process(target, PRUNE_LABEL, "docker", PRUNE_ARGS, reclaimable)]
+        vec![Candidate::process(
+            target,
+            PRUNE_LABEL,
+            "docker",
+            PRUNE_ARGS.iter().map(OsString::from).collect(),
+            ActionEstimate::Known(crate::footprint::Estimate::from_bytes(reclaimable)),
+        )]
     };
 
     Ok(Inspection {

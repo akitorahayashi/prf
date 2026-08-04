@@ -1,5 +1,7 @@
 use crate::harness::TestContext;
 use predicates::prelude::*;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
 
 #[test]
 fn current_mode_excludes_system_targets() {
@@ -13,6 +15,9 @@ fn current_mode_excludes_system_targets() {
         .success()
         .stdout(predicate::str::contains("Found cleanup targets"))
         .stdout(predicate::str::contains("Homebrew").not())
+        .stdout(predicate::str::contains("mise").not())
+        .stdout(predicate::str::contains("Bun").not())
+        .stdout(predicate::str::contains("pnpm").not())
         .stdout(predicate::str::contains("Docker").not())
         .stdout(predicate::str::contains("Unused images").not())
         .stdout(predicate::str::contains("Stopped containers").not())
@@ -38,4 +43,50 @@ fn clean_requires_a_terminal_or_yes_for_confirmation() {
         .stderr(predicate::str::contains("Pass --yes"));
 
     assert!(cache_dir.exists(), "cache directory must remain without confirmation");
+}
+
+#[test]
+fn dynamic_cache_path_cannot_contain_the_home_directory() {
+    let ctx = TestContext::new();
+    ctx.set_env("MISE_CACHE_DIR", ctx.home());
+
+    ctx.cli()
+        .arg("scan")
+        .arg("mise")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("contains protected path"));
+}
+
+#[cfg(unix)]
+#[test]
+fn canonical_home_path_is_protected_when_home_is_a_symbolic_link() {
+    let ctx = TestContext::new();
+    let home_alias = ctx.work_dir().join("home-alias");
+    symlink(ctx.home(), &home_alias).expect("home alias exists");
+    ctx.set_env("HOME", home_alias);
+    ctx.set_env("MISE_CACHE_DIR", ctx.home());
+
+    ctx.cli()
+        .arg("scan")
+        .arg("mise")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("contains protected path"));
+}
+
+#[cfg(unix)]
+#[test]
+fn pnpm_store_symlink_cannot_resolve_to_a_protected_path() {
+    let ctx = TestContext::new();
+    let store_link = ctx.home().join("Desktop/store-link");
+    symlink(ctx.home(), &store_link).expect("store link exists");
+    ctx.create_mock_command("pnpm", "#!/bin/sh\necho \"$HOME/Desktop/store-link\"\n");
+
+    ctx.cli()
+        .arg("scan")
+        .arg("pnpm")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("contains protected path"));
 }

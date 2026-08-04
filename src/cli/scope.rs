@@ -1,6 +1,6 @@
 use clap::{ArgAction, Args};
 
-use crate::cleanup::Scope;
+use crate::cleanup::InspectionInputs;
 use crate::error::AppError;
 
 #[derive(Args)]
@@ -9,13 +9,13 @@ pub struct ScopeArgs {
         short = 'c',
         long = "current",
         action = ArgAction::SetTrue,
-        help = "Use only the current directory; disable home discovery, Brew, and Docker"
+        help = "Use only the current directory; disable home discovery and default-only targets"
     )]
     current: bool,
 }
 
 impl ScopeArgs {
-    pub fn resolve(self) -> Result<Scope, AppError> {
-        Scope::from_environment(self.current)
+    pub fn resolve(self) -> Result<InspectionInputs, AppError> {
+        InspectionInputs::from_environment(self.current)
     }
 }

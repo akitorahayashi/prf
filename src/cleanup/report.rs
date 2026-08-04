@@ -7,15 +7,16 @@ use crate::footprint::{Estimate, Index};
 use super::candidate::Candidate;
 use super::plan::{RemovalCatalog, RemovalPlan};
 use super::target::{Target, TargetId};
+use super::{Action, ActionEstimate, EstimateSummary};
 
 #[derive(Debug, Clone)]
 pub struct CandidateReport {
     pub candidate: Candidate,
-    estimate: Estimate,
+    estimate: ActionEstimate,
 }
 
 impl CandidateReport {
-    pub const fn estimate(&self) -> Estimate {
+    pub const fn estimate(&self) -> ActionEstimate {
         self.estimate
     }
 }
@@ -23,11 +24,11 @@ impl CandidateReport {
 #[derive(Debug, Clone)]
 pub struct TargetReport {
     pub candidates: Vec<CandidateReport>,
-    estimate: Estimate,
+    estimate: EstimateSummary,
 }
 
 impl TargetReport {
-    pub const fn estimate(&self) -> Estimate {
+    pub const fn estimate(&self) -> EstimateSummary {
         self.estimate
     }
 }
@@ -37,9 +38,9 @@ pub struct ScanReport {
     catalog: Arc<RemovalCatalog>,
     footprint: Arc<Index>,
     reports: BTreeMap<TargetId, TargetReport>,
-    standalone_estimates: BTreeMap<TargetId, Estimate>,
+    standalone_estimates: BTreeMap<TargetId, EstimateSummary>,
     plan: RemovalPlan,
-    estimate: Estimate,
+    estimate: EstimateSummary,
 }
 
 impl ScanReport {
@@ -50,7 +51,7 @@ impl ScanReport {
             reports: BTreeMap::new(),
             standalone_estimates: BTreeMap::new(),
             plan: RemovalPlan::default(),
-            estimate: Estimate::ZERO,
+            estimate: EstimateSummary::ZERO,
         }
     }
 
@@ -86,16 +87,15 @@ impl ScanReport {
         for path in plan.paths() {
             estimates.assign(path.attribution(), breakdown.path(path.root())?)?;
         }
-        for process in plan.processes() {
-            estimates.assign(process.candidate(), process.estimate())?;
-        }
 
         let mut reports = BTreeMap::new();
         let mut standalone_estimates = BTreeMap::new();
         for (target, indices) in &indices_by_target {
             let target_plan = catalog.plan(indices)?;
-            let standalone =
-                footprint.breakdown(target_plan.roots(), target_plan.reported())?.total();
+            let standalone = EstimateSummary::new(
+                footprint.breakdown(target_plan.roots(), target_plan.reported())?.total(),
+                target_plan.unestimated_action_count(),
+            );
             standalone_estimates.insert(*target, standalone);
             if indices.is_empty() {
                 continue;
@@ -104,30 +104,25 @@ impl ScanReport {
             let candidate_reports = indices
                 .iter()
                 .map(|index| {
-                    Ok(CandidateReport {
-                        candidate: candidates[*index].clone(),
-                        estimate: estimates.get(*index)?,
-                    })
+                    let estimate = match candidates[*index].action() {
+                        Action::RemovePath { .. } => ActionEstimate::Known(estimates.get(*index)?),
+                        Action::RunProcess { estimate, .. } => *estimate,
+                    };
+                    Ok(CandidateReport { candidate: candidates[*index].clone(), estimate })
                 })
                 .collect::<Result<Vec<_>, AppError>>()?;
             let estimate = candidate_reports
                 .iter()
-                .map(CandidateReport::estimate)
-                .try_fold(Estimate::ZERO, Estimate::checked_add)?;
+                .map(|report| EstimateSummary::from(report.estimate()))
+                .try_fold(EstimateSummary::ZERO, EstimateSummary::checked_add)?;
             reports.insert(*target, TargetReport { candidates: candidate_reports, estimate });
         }
 
-        Ok(Self {
-            catalog,
-            footprint,
-            reports,
-            standalone_estimates,
-            plan,
-            estimate: breakdown.total(),
-        })
+        let estimate = EstimateSummary::new(breakdown.total(), plan.unestimated_action_count());
+        Ok(Self { catalog, footprint, reports, standalone_estimates, plan, estimate })
     }
 
-    pub const fn estimate(&self) -> Estimate {
+    pub const fn estimate(&self) -> EstimateSummary {
         self.estimate
     }
 
@@ -144,7 +139,7 @@ impl ScanReport {
         Self::view(Arc::clone(&self.catalog), Arc::clone(&self.footprint), &target_ids)
     }
 
-    pub fn standalone_estimate(&self, target: TargetId) -> Result<Estimate, AppError> {
+    pub fn standalone_estimate(&self, target: TargetId) -> Result<EstimateSummary, AppError> {
         self.standalone_estimates.get(&target).copied().ok_or_else(|| {
             AppError::Cleanup("standalone estimate references an unknown report target".to_string())
         })
@@ -200,13 +195,13 @@ mod tests {
     use assert_fs::prelude::*;
 
     use super::*;
-    use crate::cleanup::{Candidate, ScopeSupport};
-    use crate::cleanup::{Discovery, Inspection, Scope};
+    use crate::cleanup::{Candidate, InspectionInputs, ScopeSupport};
+    use crate::cleanup::{Discovery, Inspection};
 
     const FIRST: TargetId = TargetId::new("first");
     const SECOND: TargetId = TargetId::new("second");
 
-    fn no_inspection(_: TargetId, _: &Scope) -> Result<Inspection, AppError> {
+    fn no_inspection(_: TargetId, _: &InspectionInputs) -> Result<Inspection, AppError> {
         Ok(Inspection::default())
     }
 
@@ -216,7 +211,7 @@ mod tests {
         Target::new(SECOND, "Second", ScopeSupport::AllModes, Discovery::Inspector(no_inspection));
 
     fn build(candidates: Vec<Candidate>) -> ScanReport {
-        let catalog = RemovalCatalog::new(candidates).expect("catalog is valid");
+        let catalog = RemovalCatalog::new(candidates, &[]).expect("catalog is valid");
         let footprint =
             Index::measure(&catalog.measurement_roots()).expect("footprint is measured");
         ScanReport::build(catalog, footprint, &[&FIRST_TARGET, &SECOND_TARGET])
@@ -239,8 +234,8 @@ mod tests {
         let second_contribution = report.report_for(SECOND).expect("second report").estimate();
         let second_alone = report.standalone_estimate(SECOND).expect("standalone estimate");
 
-        assert!(first >= second_alone);
-        assert_eq!(second_contribution, Estimate::ZERO);
+        assert!(first.known() >= second_alone.known());
+        assert_eq!(second_contribution, EstimateSummary::ZERO);
         assert_eq!(report.estimate(), first);
         assert_eq!(first.checked_add(second_contribution).unwrap(), report.estimate());
         assert_eq!(report.subset(&[&SECOND_TARGET]).unwrap().estimate(), second_alone);
@@ -261,12 +256,15 @@ mod tests {
         let candidate_total = target
             .candidates
             .iter()
-            .map(CandidateReport::estimate)
-            .try_fold(Estimate::ZERO, Estimate::checked_add)
+            .map(|report| EstimateSummary::from(report.estimate()))
+            .try_fold(EstimateSummary::ZERO, EstimateSummary::checked_add)
             .expect("candidate total is valid");
 
         assert_eq!(candidate_total, target.estimate());
-        assert_eq!(target.estimate().bytes(), fs::metadata(first.path()).unwrap().blocks() * 512);
+        assert_eq!(
+            target.estimate().known().bytes(),
+            fs::metadata(first.path()).unwrap().blocks() * 512
+        );
     }
 
     #[test]
@@ -275,7 +273,7 @@ mod tests {
         let root = temp.child("cache");
         root.create_dir_all().expect("root exists");
         let candidates = vec![Candidate::directory(FIRST, root.path().to_path_buf())];
-        let catalog = RemovalCatalog::new(candidates).expect("catalog is valid");
+        let catalog = RemovalCatalog::new(candidates, &[]).expect("catalog is valid");
         fs::remove_dir(root.path()).expect("root disappears before measurement");
         let footprint =
             Index::measure(&catalog.measurement_roots()).expect("missing root is tolerated");
@@ -283,7 +281,32 @@ mod tests {
         let report =
             ScanReport::build(catalog, footprint, &[&FIRST_TARGET]).expect("report is built");
 
-        assert_eq!(report.estimate(), Estimate::ZERO);
+        assert_eq!(report.estimate(), EstimateSummary::ZERO);
+    }
+
+    #[test]
+    fn process_without_a_dry_run_remains_unestimated_in_every_view() {
+        let report = build(vec![Candidate::process(
+            FIRST,
+            "prune",
+            "pnpm",
+            vec!["store".into(), "prune".into()],
+            ActionEstimate::Unestimated,
+        )]);
+
+        assert_eq!(report.estimate(), EstimateSummary::new(Estimate::ZERO, 1));
+        assert_eq!(
+            report.report_for(FIRST).expect("target report").estimate(),
+            EstimateSummary::new(Estimate::ZERO, 1)
+        );
+        assert_eq!(
+            report.standalone_estimate(FIRST).expect("standalone estimate"),
+            EstimateSummary::new(Estimate::ZERO, 1)
+        );
+        assert_eq!(
+            report.subset(&[&SECOND_TARGET]).expect("subset builds").estimate(),
+            EstimateSummary::ZERO
+        );
     }
 
     #[test]

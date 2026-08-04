@@ -38,14 +38,14 @@ pub enum AppError {
 
     #[error("Cannot start {label} with '{program}': {source}")]
     ProcessStart {
-        label: &'static str,
-        program: &'static str,
+        label: String,
+        program: String,
         #[source]
         source: io::Error,
     },
 
     #[error("{label} failed with status {status} while running '{program}'")]
-    ProcessExit { label: &'static str, program: &'static str, status: ExitStatus },
+    ProcessExit { label: String, program: String, status: ExitStatus },
 
     #[error("Cleanup incomplete: {retained} retained, {failed} failed")]
     IncompleteCleanup { retained: usize, failed: usize },

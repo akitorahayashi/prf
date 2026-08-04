@@ -9,6 +9,7 @@ use crate::fs::remove::{RemovalStatus, remove_file, safe_remove_dir_all};
 
 use super::action::EntryKind;
 use super::plan::{PathRemoval, ProcessRemoval, RemovalPlan};
+use super::{ActionEstimate, EstimateSummary};
 
 #[derive(Debug)]
 pub enum PathStatus {
@@ -27,13 +28,13 @@ pub enum ProcessStatus {
 #[derive(Debug)]
 pub enum ActionOutcome {
     Path { path: PathBuf, status: PathStatus },
-    Process { label: &'static str, program: &'static str, status: ProcessStatus },
+    Process { label: String, program: String, status: ProcessStatus },
 }
 
 #[derive(Debug)]
 pub struct ApplyReport {
     outcomes: Vec<ActionOutcome>,
-    freed_estimate: Estimate,
+    reclaimed: EstimateSummary,
     estimation_error: Option<AppError>,
 }
 
@@ -42,8 +43,8 @@ impl ApplyReport {
         &self.outcomes
     }
 
-    pub const fn freed_estimate(&self) -> Estimate {
-        self.freed_estimate
+    pub const fn reclaimed(&self) -> EstimateSummary {
+        self.reclaimed
     }
 
     pub fn removed_count(&self) -> usize {
@@ -123,9 +124,20 @@ where
     });
     let completed_estimates = process_outcomes.iter().filter_map(|(estimate, outcome)| {
         matches!(outcome, ActionOutcome::Process { status: ProcessStatus::Completed, .. })
-            .then_some(*estimate)
+            .then(|| estimate.known())
+            .flatten()
     });
-    let (freed_estimate, estimation_error) =
+    let unestimated_actions = process_outcomes
+        .iter()
+        .filter(|(estimate, outcome)| {
+            *estimate == ActionEstimate::Unestimated
+                && matches!(
+                    outcome,
+                    ActionOutcome::Process { status: ProcessStatus::Completed, .. }
+                )
+        })
+        .count();
+    let (known_reclaimed, estimation_error) =
         match footprint.breakdown(completed_roots, completed_estimates) {
             Ok(breakdown) => (breakdown.total(), None),
             Err(error) => (Estimate::ZERO, Some(AppError::Footprint(error))),
@@ -136,7 +148,11 @@ where
         .chain(process_outcomes.into_iter().map(|(_, outcome)| outcome))
         .collect();
 
-    ApplyReport { outcomes, freed_estimate, estimation_error }
+    ApplyReport {
+        outcomes,
+        reclaimed: EstimateSummary::new(known_reclaimed, unestimated_actions),
+        estimation_error,
+    }
 }
 
 fn apply_paths<F>(paths: &[PathRemoval], on_completed: &F) -> Vec<(RootId, ActionOutcome)>
@@ -165,7 +181,7 @@ where
 fn apply_processes<F>(
     processes: &[ProcessRemoval],
     on_completed: &F,
-) -> Vec<(Estimate, ActionOutcome)>
+) -> Vec<(ActionEstimate, ActionOutcome)>
 where
     F: Fn() + Sync,
 {
@@ -176,8 +192,8 @@ where
                 .args(process.args())
                 .status()
                 .map_err(|source| AppError::ProcessStart {
-                    label: process.label(),
-                    program: process.program(),
+                    label: process.label().to_string(),
+                    program: process.program().to_string(),
                     source,
                 })
                 .and_then(|status| {
@@ -185,8 +201,8 @@ where
                         Ok(())
                     } else {
                         Err(AppError::ProcessExit {
-                            label: process.label(),
-                            program: process.program(),
+                            label: process.label().to_string(),
+                            program: process.program().to_string(),
                             status,
                         })
                     }
@@ -199,8 +215,8 @@ where
             (
                 process.estimate(),
                 ActionOutcome::Process {
-                    label: process.label(),
-                    program: process.program(),
+                    label: process.label().to_string(),
+                    program: process.program().to_string(),
                     status,
                 },
             )
@@ -223,7 +239,7 @@ mod tests {
     const TARGET: TargetId = TargetId::new("test");
 
     fn prepare(candidates: &[Candidate]) -> (RemovalPlan, Index) {
-        let catalog = RemovalCatalog::new(candidates.to_vec()).expect("catalog is valid");
+        let catalog = RemovalCatalog::new(candidates.to_vec(), &[]).expect("catalog is valid");
         let footprint =
             Index::measure(&catalog.measurement_roots()).expect("footprint is measured");
         let selected = (0..candidates.len()).collect::<Vec<_>>();
@@ -267,7 +283,7 @@ mod tests {
         assert_eq!(report.removed_count(), 0);
         assert_eq!(report.absent_count(), 1);
         assert_eq!(report.failed_count(), 0);
-        assert_eq!(report.freed_estimate(), Estimate::ZERO);
+        assert_eq!(report.reclaimed(), EstimateSummary::new(Estimate::ZERO, 0));
     }
 
     #[test]
@@ -323,7 +339,24 @@ mod tests {
 
         let report = apply_plan(&plan, &footprint, |_| {}, || {});
 
-        assert_eq!(report.freed_estimate().bytes(), expected);
+        assert_eq!(report.reclaimed().known().bytes(), expected);
+    }
+
+    #[test]
+    fn successful_unestimated_process_remains_unestimated_after_application() {
+        let candidates = vec![Candidate::process(
+            TARGET,
+            "unestimated process",
+            "/bin/sh",
+            vec!["-c".into(), "exit 0".into()],
+            ActionEstimate::Unestimated,
+        )];
+        let (plan, footprint) = prepare(&candidates);
+
+        let report = apply_plan(&plan, &footprint, |_| {}, || {});
+
+        assert_eq!(report.reclaimed(), EstimateSummary::new(Estimate::ZERO, 1));
+        assert_eq!(report.removed_count(), 1);
     }
 
     #[test]
@@ -348,7 +381,7 @@ mod tests {
         physical.assert(predicates::path::is_dir());
         physical.child("cache.bin").assert(predicates::path::is_file());
         alias.assert(predicates::path::missing());
-        assert_eq!(report.freed_estimate(), expected);
+        assert_eq!(report.reclaimed().known(), expected);
     }
 
     #[test]
@@ -359,15 +392,16 @@ mod tests {
         let script = temp.child("record.sh");
         script.write_str("printf invoked > \"$1\"\nexit 7\n").expect("script exists");
         let marker = temp.path().join("process-invoked");
-        let script_arg: &'static str =
-            Box::leak(script.path().to_string_lossy().into_owned().into_boxed_str());
-        let marker_arg: &'static str =
-            Box::leak(marker.to_string_lossy().into_owned().into_boxed_str());
-        let args: &'static [&'static str] =
-            Box::leak(vec![script_arg, marker_arg].into_boxed_slice());
+        let args = vec![script.path().into(), marker.as_os_str().into()];
         let candidates = vec![
             Candidate::file(TARGET, directory.path().to_path_buf()),
-            Candidate::process(TARGET, "record process", "/bin/sh", args, 0),
+            Candidate::process(
+                TARGET,
+                "record process",
+                "/bin/sh",
+                args,
+                ActionEstimate::Known(Estimate::ZERO),
+            ),
         ];
         let (plan, footprint) = prepare(&candidates);
         let planned = AtomicUsize::new(0);

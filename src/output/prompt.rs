@@ -1,9 +1,9 @@
 use std::io::{self, IsTerminal, Write};
 
-use crate::cleanup::{ScanReport, Target};
+use crate::cleanup::{EstimateSummary, ScanReport, Target};
 use crate::error::AppError;
 
-use super::bytes::format_bytes;
+use super::bytes::{format_estimate_compact, format_estimate_detail};
 
 pub fn prompt_for_targets<'a>(
     report: &ScanReport,
@@ -21,8 +21,14 @@ pub fn prompt_for_targets<'a>(
     )?;
 
     for (index, target) in available_targets.iter().enumerate() {
-        let size = report.standalone_estimate(target.id())?.bytes();
-        writeln!(output, "  [{}] {:<8} {:>10}", index + 1, target, format_bytes(size))?;
+        let estimate = report.standalone_estimate(target.id())?;
+        writeln!(
+            output,
+            "  [{}] {:<8} {:>10}",
+            index + 1,
+            target,
+            format_estimate_compact(estimate)
+        )?;
     }
 
     write!(output, "Selection: ")?;
@@ -90,14 +96,14 @@ fn push_unique<'a>(selected: &mut Vec<&'a Target>, target: &'a Target) {
     }
 }
 
-pub fn confirm_deletion(total_size: u64) -> Result<bool, AppError> {
+pub fn confirm_deletion(estimate: EstimateSummary) -> Result<bool, AppError> {
     if !io::stdin().is_terminal() {
         return Err(AppError::ConfirmationRequiresTerminal);
     }
 
     let stdout = io::stdout();
     let mut output = stdout.lock();
-    writeln!(output, "About to delete {}. Proceed? [y/N]", format_bytes(total_size))?;
+    writeln!(output, "About to clean {}. Proceed? [y/N]", format_estimate_detail(estimate))?;
     write!(output, "Confirm: ")?;
     output.flush()?;
     drop(output);

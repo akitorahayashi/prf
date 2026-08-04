@@ -15,6 +15,8 @@ Testing is organized by ownership boundary and externally observable behavior:
 `app::clean` tests inject recorded target-selection and confirmation decisions. This exercises the
 interactive orchestration contract without weakening the production requirement that prompts read
 from terminal stdin. CLI integration tests cover the corresponding non-interactive errors.
+`TestContext` isolates cache-related environment variables and pins `PATH` to mock optional tools,
+so host pnpm and Docker installations cannot enter tests.
 
 ## Principles
 

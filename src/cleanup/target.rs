@@ -2,8 +2,7 @@ use std::fmt;
 
 use crate::error::AppError;
 
-use super::discovery::{Discovery, Inspection};
-use super::scope::Scope;
+use super::discovery::{Discovery, Inspection, InspectionInputs};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TargetId(&'static str);
@@ -65,11 +64,11 @@ impl Target {
         self.scope_support
     }
 
-    pub fn inspect(&self, scope: &Scope) -> Result<Inspection, AppError> {
-        if scope.is_current() && !self.scope_support.supports_current() {
+    pub fn inspect(&self, inputs: &InspectionInputs) -> Result<Inspection, AppError> {
+        if inputs.scope().is_current() && !self.scope_support.supports_current() {
             return Err(AppError::UnsupportedCurrentModeTarget(self.id.to_string()));
         }
-        self.discovery.inspect(self.id, scope)
+        self.discovery.inspect(self.id, inputs)
     }
 }
 
@@ -83,7 +82,7 @@ impl fmt::Display for Target {
 mod tests {
     use super::*;
 
-    fn unexpected_inspection(_: TargetId, _: &Scope) -> Result<Inspection, AppError> {
+    fn unexpected_inspection(_: TargetId, _: &InspectionInputs) -> Result<Inspection, AppError> {
         panic!("unsupported target inspection must not run")
     }
 
@@ -95,11 +94,12 @@ mod tests {
             ScopeSupport::DefaultOnly,
             Discovery::Inspector(unexpected_inspection),
         );
-        let scope = Scope::resolve(true, Some("/home".into()), "/working".into())
+        let scope = crate::cleanup::Scope::resolve(true, Some("/home".into()), "/working".into())
             .expect("current scope resolves");
+        let inputs = InspectionInputs::for_test(scope);
 
         assert!(matches!(
-            target.inspect(&scope),
+            target.inspect(&inputs),
             Err(AppError::UnsupportedCurrentModeTarget(name)) if name == "global"
         ));
     }

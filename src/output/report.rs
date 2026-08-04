@@ -8,7 +8,7 @@ use crate::cleanup::{
 };
 use crate::error::AppError;
 
-use super::bytes::format_bytes;
+use super::bytes::{format_action_estimate, format_estimate_compact, format_estimate_detail};
 use super::messages;
 
 pub fn display_path(path: &Path, home: Option<&Path>) -> String {
@@ -24,7 +24,7 @@ pub fn display_path(path: &Path, home: Option<&Path>) -> String {
 fn candidate_display(action: &Action, home: Option<&Path>) -> String {
     match action {
         Action::RemovePath { path, .. } => display_path(path, home),
-        Action::RunProcess { label, .. } => (*label).to_string(),
+        Action::RunProcess { label, .. } => label.clone(),
     }
 }
 
@@ -60,7 +60,7 @@ pub fn print_scan_report(
                 output,
                 "- {:<8} {:>10} across {} item(s)",
                 target.display_name(),
-                format_bytes(target_report.estimate().bytes()),
+                format_estimate_compact(target_report.estimate()),
                 target_report.candidates.len()
             )?;
             if verbose {
@@ -69,13 +69,13 @@ pub fn print_scan_report(
                         output,
                         "    • {:<60} {}",
                         candidate_display(candidate_report.candidate.action(), home),
-                        format_bytes(candidate_report.estimate().bytes())
+                        format_action_estimate(candidate_report.estimate())
                     )?;
                 }
             }
         }
     }
-    writeln!(output, "Total reclaimable: {}", format_bytes(report.estimate().bytes()))?;
+    writeln!(output, "Total reclaimable: {}", format_estimate_detail(report.estimate()))?;
     Ok(())
 }
 
@@ -126,7 +126,7 @@ pub fn print_deletion_plan(
                 output,
                 "- {:<8} {:>10} across {} item(s)",
                 target.display_name(),
-                format_bytes(target_report.estimate().bytes()),
+                format_estimate_compact(target_report.estimate()),
                 target_report.candidates.len()
             )?;
             for candidate_report in &target_report.candidates {
@@ -135,7 +135,7 @@ pub fn print_deletion_plan(
                         output,
                         "    • {:<60} {}",
                         candidate_display(candidate_report.candidate.action(), home),
-                        format_bytes(candidate_report.estimate().bytes())
+                        format_action_estimate(candidate_report.estimate())
                     )?;
                 } else {
                     writeln!(
@@ -147,7 +147,7 @@ pub fn print_deletion_plan(
             }
         }
     }
-    writeln!(output, "Total to delete: {}", format_bytes(report.estimate().bytes()))?;
+    writeln!(output, "Total to delete: {}", format_estimate_detail(report.estimate()))?;
     Ok(())
 }
 
@@ -183,7 +183,7 @@ pub fn print_cleanup_report(
     }
 
     print_stdout_line(&messages::deletion_summary(
-        report.freed_estimate().bytes(),
+        report.reclaimed(),
         report.removed_count(),
         report.absent_count(),
         report.retained_count(),
