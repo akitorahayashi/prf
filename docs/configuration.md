@@ -23,6 +23,18 @@ The CLI currently uses command-line flags as the primary runtime configuration s
 - Deletion confirmation control: `-y/--yes`
 - Verbose reporting: `-v/--verbose`
 
+Environment-derived paths are captured once before target resolution and inspection:
+
+- `MISE_CACHE_DIR`, then `XDG_CACHE_HOME`, controls the mise cache location
+- `BUN_INSTALL_CACHE_DIR` controls the Bun package cache location
+- `XDG_CONFIG_HOME/.bunfig.toml` or `~/.bunfig.toml` supplies Bun's global
+  `install.cache.dir` when the environment override is absent
+- pnpm's effective configuration is resolved by `pnpm store path --silent`, and that scanned path
+  is bound to the later prune action
+
+Invalid configured paths and malformed Bun configuration are discovery failures. Dynamic cache
+paths cannot contain HOME, the scan root, the working directory, or the process temporary root.
+
 ## CI/CD Contract
 
 - `.github/workflows/ci-workflows.yml` orchestrates reusable workflows for static checks, tests, coverage, and build.

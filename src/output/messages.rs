@@ -1,5 +1,7 @@
 //! Construction of individual user-facing message lines.
 
+use crate::cleanup::EstimateSummary;
+
 use super::bytes::format_bytes;
 
 pub fn discovering(display_name: &str) -> String {
@@ -39,16 +41,26 @@ pub fn aborted() -> &'static str {
 }
 
 pub fn deletion_summary(
-    freed: u64,
+    reclaimed: EstimateSummary,
     removed: usize,
     absent: usize,
     retained: usize,
     failed: usize,
     targets: usize,
 ) -> String {
+    let reclaimed = match (reclaimed.known().bytes(), reclaimed.unestimated_actions()) {
+        (known, 0) => format!("~{}", format_bytes(known)),
+        (0, count) => {
+            format!("an unestimated amount from {count} {}", plural(count, "action", "actions"))
+        }
+        (known, count) => format!(
+            "~{} known plus {count} unestimated {}",
+            format_bytes(known),
+            plural(count, "action", "actions")
+        ),
+    };
     format!(
-        "Reclaimed ~{} across {} {}: {} completed, {} already absent, {} retained, {} failed.",
-        format_bytes(freed),
+        "Reclaimed {reclaimed} across {} {}: {} completed, {} already absent, {} retained, {} failed.",
         targets,
         plural(targets, "target", "targets"),
         removed,

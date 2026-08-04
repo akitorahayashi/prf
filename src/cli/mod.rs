@@ -55,10 +55,10 @@ fn try_execute() -> Result<(), AppError> {
 
     match cli.command {
         Commands::Scan(args) => {
-            let scope = args.scope.resolve()?;
+            let inputs = args.scope.resolve()?;
             let request = args.targets.into_request();
-            let targets = request.resolve(scope.mode())?;
-            let options = app::scan::ScanOptions { targets, scope, verbose: args.verbose };
+            let targets = request.resolve(inputs.scope().mode())?;
+            let options = app::scan::ScanOptions { targets, inputs, verbose: args.verbose };
             if args.list {
                 app::scan::list_targets(options)?;
             } else {
@@ -66,10 +66,10 @@ fn try_execute() -> Result<(), AppError> {
             }
         }
         Commands::Clean(args) => {
-            let scope = args.scope.resolve()?;
+            let inputs = args.scope.resolve()?;
             let request = args.targets.into_request();
             let prompt_for_targets = request.is_omitted();
-            let targets = request.resolve(scope.mode())?;
+            let targets = request.resolve(inputs.scope().mode())?;
             let selection = if prompt_for_targets {
                 app::clean::CleanSelection::PromptFrom(targets)
             } else {
@@ -77,7 +77,7 @@ fn try_execute() -> Result<(), AppError> {
             };
             let options = app::clean::CleanOptions {
                 selection,
-                scope,
+                inputs,
                 verbose: args.verbose,
                 assume_yes: args.yes,
             };

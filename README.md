@@ -42,16 +42,24 @@ prf cln rust --current -y    # Alias for current-directory cleanup
 | `python`  | Python caches such as `__pycache__`, `.pytest_cache`, `.ruff_cache`, `.mypy_cache`, and `.venv`. |
 | `rust`    | Rust build artifacts in `target` directories. |
 | `nodejs`  | Node.js artifacts including `node_modules`, `.next`, `.nuxt`, and `.svelte-kit`. |
+| `mise`    | The global mise cache. Skipped in `--current` mode. |
+| `bun`     | Bun's global package cache, including its optional global virtual store. Skipped in `--current` mode. |
+| `pnpm`    | Unreferenced packages removed by `pnpm store prune`. Skipped in `--current` mode. |
 | `brew`    | Homebrew caches and build artifacts. Skipped in `--current` mode. |
 | `docker`  | Unused Docker images, containers, networks, build cache, and volumes. Skipped in `--current` mode. |
 
 ### Safety Model
 
-1. Scans report estimated reclaimable allocated disk space per target.
+1. Scans report known reclaimable allocated disk space and mark actions that cannot be estimated
+   without mutation.
 2. Positional targets, `--all`, and interactive selection constrain deletion scope.
 3. Destructive actions require confirmation unless `-y/--yes` is supplied.
 4. Symbolic-link cleanup removes the link entry without following its target.
 5. Partial cleanup reports completed, absent, retained, and failed actions before exiting non-zero.
+
+The pnpm CLI does not expose a non-destructive store-prune estimate, so pnpm remains explicitly
+unestimated until the confirmed `pnpm store prune` action completes. Clearing Bun's cache also
+clears its optional global virtual store; affected projects require `bun install` before reuse.
 
 ## Architecture
 

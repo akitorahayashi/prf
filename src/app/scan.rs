@@ -4,7 +4,7 @@ use std::time::Duration;
 use indicatif::{MultiProgress, ProgressBar};
 use rayon::prelude::*;
 
-use crate::cleanup::{Inspection, RemovalCatalog, ScanReport, Scope, Target};
+use crate::cleanup::{Inspection, InspectionInputs, RemovalCatalog, ScanReport, Target};
 use crate::error::AppError;
 use crate::footprint::Index;
 use crate::output::messages;
@@ -13,14 +13,14 @@ use crate::output::report::{print_diagnostics, print_list_results, print_scan_re
 
 pub struct ScanOptions {
     pub targets: Vec<&'static Target>,
-    pub scope: Scope,
+    pub inputs: InspectionInputs,
     pub verbose: bool,
 }
 
 pub fn execute(options: ScanOptions) -> Result<ScanReport, AppError> {
     let progress = Arc::new(MultiProgress::new());
-    let report = scan_targets(&options.targets, &options.scope, &progress)?;
-    print_scan_report(&report, &options.targets, options.verbose, options.scope.home())?;
+    let report = scan_targets(&options.targets, &options.inputs, &progress)?;
+    print_scan_report(&report, &options.targets, options.verbose, options.inputs.scope().home())?;
     Ok(report)
 }
 
@@ -36,14 +36,14 @@ where
     F: FnOnce(&[&Target], &[Inspection], Option<&std::path::Path>) -> Result<(), AppError>,
 {
     let inspections: Result<Vec<Inspection>, AppError> =
-        options.targets.par_iter().map(|target| target.inspect(&options.scope)).collect();
+        options.targets.par_iter().map(|target| target.inspect(&options.inputs)).collect();
     let inspections = inspections?;
-    render(&options.targets, &inspections, options.scope.home())
+    render(&options.targets, &inspections, options.inputs.scope().home())
 }
 
 pub fn scan_targets(
     targets: &[&Target],
-    scope: &Scope,
+    inputs: &InspectionInputs,
     progress: &Arc<MultiProgress>,
 ) -> Result<ScanReport, AppError> {
     if targets.is_empty() {
@@ -60,7 +60,7 @@ pub fn scan_targets(
             spinner.enable_steady_tick(Duration::from_millis(100));
             spinner.set_message(messages::discovering(target.display_name()));
 
-            let inspection = target.inspect(scope);
+            let inspection = target.inspect(inputs);
             spinner.finish_and_clear();
             if let Ok(result) = &inspection {
                 discovery_progress.println(messages::discovery_complete(
@@ -86,7 +86,7 @@ pub fn scan_targets(
     footprint_spinner.enable_steady_tick(Duration::from_millis(100));
     footprint_spinner.set_message(messages::calculating_footprint(total_items));
     let measurement = (|| {
-        let catalog = RemovalCatalog::new(candidates)?;
+        let catalog = RemovalCatalog::new(candidates, &inputs.protected_paths())?;
         let footprint = Index::measure(&catalog.measurement_roots())?;
         Ok::<_, AppError>((catalog, footprint))
     })();
@@ -103,14 +103,14 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::cleanup::{Candidate, Discovery, ScopeSupport, TargetId};
+    use crate::cleanup::{Candidate, Discovery, Scope, ScopeSupport, TargetId};
 
     const TARGET_ID: TargetId = TargetId::new("list-test");
     const UNMEASURABLE: &str = "/dev/null/prf-list-candidate";
 
     fn inspect_without_measurement(
         target: TargetId,
-        _scope: &Scope,
+        _inputs: &InspectionInputs,
     ) -> Result<Inspection, AppError> {
         Ok(Inspection {
             candidates: vec![Candidate::directory(target, PathBuf::from(UNMEASURABLE))],
@@ -135,9 +135,10 @@ mod tests {
         assert_eq!(precondition.kind(), ErrorKind::NotADirectory);
         let scope =
             Scope::resolve(true, None, PathBuf::from("/unused")).expect("current scope resolves");
+        let inputs = InspectionInputs::for_test(scope);
 
         list_targets_with(
-            ScanOptions { targets: vec![&TARGET], scope, verbose: false },
+            ScanOptions { targets: vec![&TARGET], inputs, verbose: false },
             |_targets, inspections, _home| {
                 assert_eq!(inspections[0].candidates.len(), 1);
                 Ok(())

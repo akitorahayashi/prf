@@ -22,6 +22,68 @@ fn clean_nodejs_yes_deletes_directories() {
 }
 
 #[test]
+fn clean_mise_yes_deletes_the_global_cache() {
+    let ctx = TestContext::new();
+    let cache_file = ctx.write_home_file("Library/Caches/mise/node/versions.msgpack", "cache");
+    let cache = cache_file.ancestors().nth(2).expect("mise cache ancestor").to_path_buf();
+
+    ctx.cli().arg("clean").arg("mise").arg("-y").assert().success();
+
+    assert!(!cache.exists(), "mise cache should be deleted");
+}
+
+#[cfg(unix)]
+#[test]
+fn clean_bun_removes_a_cache_link_without_touching_its_target() {
+    let ctx = TestContext::new();
+    let install = ctx.create_home_dir(".bun/install");
+    let outside = ctx.create_home_dir("outside-bun-cache");
+    let sentinel = outside.join("sentinel.txt");
+    std::fs::write(&sentinel, "preserve").expect("sentinel exists");
+    let cache = install.join("cache");
+    symlink(&outside, &cache).expect("Bun cache link exists");
+
+    ctx.cli().arg("clean").arg("bun").arg("-y").assert().success();
+
+    assert!(std::fs::symlink_metadata(cache).is_err(), "cache link should be removed");
+    assert_eq!(std::fs::read_to_string(sentinel).unwrap(), "preserve");
+}
+
+#[test]
+fn clean_pnpm_prunes_the_store_resolved_by_the_scan() {
+    let ctx = TestContext::new();
+    let store = ctx.create_home_dir("Library/pnpm/store/v11");
+    let marker = ctx.work_dir().join("pnpm_prune_marker");
+    ctx.set_env("PRF_TEST_MARKER", &marker);
+    ctx.create_mock_command(
+        "pnpm",
+        r#"#!/bin/sh
+if [ "$1" = "store" ] && [ "$2" = "path" ]; then
+  echo "$HOME/Library/pnpm/store/v11"
+  exit 0
+fi
+if [ "$2" = "store" ] && [ "$3" = "prune" ]; then
+  echo "$@" > "$PRF_TEST_MARKER"
+  exit 0
+fi
+exit 9
+"#,
+    );
+
+    ctx.cli()
+        .arg("clean")
+        .arg("pnpm")
+        .arg("-y")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("unestimated amount"))
+        .stdout(predicate::str::contains("1 completed"));
+
+    let recorded = std::fs::read_to_string(marker).expect("pnpm prune should have been invoked");
+    assert_eq!(recorded.trim(), format!("--store-dir={} store prune", store.display()));
+}
+
+#[test]
 fn clean_routes_docker_prune_to_system_prune_not_a_filesystem_path() {
     let ctx = TestContext::new();
     let marker = ctx.work_dir().join("docker_prune_marker");

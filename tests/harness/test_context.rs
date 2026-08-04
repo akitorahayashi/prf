@@ -38,11 +38,8 @@ impl TestContext {
         context
     }
 
-    /// Pins PATH to the mock bin directory only, so external tools such as `docker` resolve
-    /// solely when a mock has been installed. Including system dirs like `/usr/bin` would let
-    /// a host-installed `docker` leak in, so they are deliberately excluded; the CLI shells
-    /// out only to `docker`, and mock scripts rely on the kernel resolving their `#!/bin/sh`
-    /// shebang directly rather than on PATH.
+    /// Pins PATH to the mock bin directory so optional tool commands resolve only when a mock has
+    /// been installed. Mock scripts rely on the kernel resolving their `#!/bin/sh` shebang.
     fn set_controlled_path(&self) {
         self.set_env("PATH", &self.bin_dir);
     }
@@ -61,7 +58,12 @@ impl TestContext {
 
     pub(crate) fn cli_in<P: AsRef<Path>>(&self, dir: P) -> Command {
         let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("prf"));
-        cmd.current_dir(dir.as_ref()).env("HOME", &self.home);
+        cmd.current_dir(dir.as_ref())
+            .env("HOME", &self.home)
+            .env_remove("XDG_CACHE_HOME")
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("MISE_CACHE_DIR")
+            .env_remove("BUN_INSTALL_CACHE_DIR");
 
         for (key, value) in self.env_vars.borrow().iter() {
             cmd.env(key, value);

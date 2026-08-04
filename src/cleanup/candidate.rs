@@ -1,8 +1,8 @@
+use std::ffi::OsString;
 use std::path::PathBuf;
 
-use crate::footprint::Estimate;
-
 use super::action::{Action, EntryKind};
+use super::estimate::ActionEstimate;
 use super::target::TargetId;
 
 #[derive(Debug, Clone)]
@@ -26,18 +26,18 @@ impl Candidate {
 
     pub fn process(
         target: TargetId,
-        label: &'static str,
-        program: &'static str,
-        args: &'static [&'static str],
-        reported_bytes: u64,
+        label: impl Into<String>,
+        program: impl Into<String>,
+        args: Vec<OsString>,
+        estimate: ActionEstimate,
     ) -> Self {
         Self {
             target,
             action: Action::RunProcess {
-                label,
-                program,
+                label: label.into(),
+                program: program.into(),
                 args,
-                estimate: Estimate::from_bytes(reported_bytes),
+                estimate,
             },
         }
     }
@@ -65,12 +65,19 @@ mod tests {
     }
 
     #[test]
-    fn process_candidates_own_their_reported_estimate() {
-        let candidate = Candidate::process(TARGET, "process", "program", &["arg"], 42);
+    fn process_candidates_own_dynamic_arguments_and_their_estimate_basis() {
+        let candidate = Candidate::process(
+            TARGET,
+            "process",
+            "program",
+            vec![OsString::from("arg")],
+            ActionEstimate::Unestimated,
+        );
 
         assert!(matches!(
             candidate.action(),
-            Action::RunProcess { estimate, .. } if *estimate == Estimate::from_bytes(42)
+            Action::RunProcess { args, estimate, .. }
+                if args == &[OsString::from("arg")] && *estimate == ActionEstimate::Unestimated
         ));
     }
 }

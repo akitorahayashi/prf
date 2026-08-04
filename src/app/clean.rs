@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use indicatif::{MultiProgress, ProgressBar};
 
-use crate::cleanup::{Scope, Target, apply_plan};
+use crate::cleanup::{EstimateSummary, InspectionInputs, Target, apply_plan};
 use crate::error::AppError;
 use crate::output::messages;
 use crate::output::progress::deletion_progress_style;
@@ -18,7 +18,7 @@ pub enum CleanSelection {
 
 pub struct CleanOptions {
     pub selection: CleanSelection,
-    pub scope: Scope,
+    pub inputs: InspectionInputs,
     pub verbose: bool,
     pub assume_yes: bool,
 }
@@ -30,7 +30,7 @@ trait DecisionSource {
         available: &[&'a Target],
     ) -> Result<Vec<&'a Target>, AppError>;
 
-    fn confirm_deletion(&mut self, total_size: u64) -> Result<bool, AppError>;
+    fn confirm_deletion(&mut self, estimate: EstimateSummary) -> Result<bool, AppError>;
 }
 
 struct TerminalDecisions;
@@ -44,8 +44,8 @@ impl DecisionSource for TerminalDecisions {
         prompt_for_targets(report, available)
     }
 
-    fn confirm_deletion(&mut self, total_size: u64) -> Result<bool, AppError> {
-        confirm_deletion(total_size)
+    fn confirm_deletion(&mut self, estimate: EstimateSummary) -> Result<bool, AppError> {
+        confirm_deletion(estimate)
     }
 }
 
@@ -62,7 +62,7 @@ fn execute_with(
         CleanSelection::Fixed(targets) => (targets, false),
     };
     let progress = Arc::new(MultiProgress::new());
-    let report = scan_targets(&targets, &options.scope, &progress)?;
+    let report = scan_targets(&targets, &options.inputs, &progress)?;
 
     if report.is_empty() {
         print_stdout_line(messages::nothing_to_delete())?;
@@ -88,8 +88,13 @@ fn execute_with(
         return Ok(());
     }
 
-    print_deletion_plan(&subset, &selected_targets, options.verbose, options.scope.home())?;
-    if !options.assume_yes && !decisions.confirm_deletion(subset.estimate().bytes())? {
+    print_deletion_plan(
+        &subset,
+        &selected_targets,
+        options.verbose,
+        options.inputs.scope().home(),
+    )?;
+    if !options.assume_yes && !decisions.confirm_deletion(subset.estimate())? {
         print_stdout_line(messages::aborted())?;
         return Ok(());
     }
@@ -106,7 +111,7 @@ fn execute_with(
     deletion_bar.finish_and_clear();
 
     progress.println(messages::deletion_complete(report.planned_count(), plan.action_count()))?;
-    print_cleanup_report(&report, subset.target_ids().len(), options.scope.home())?;
+    print_cleanup_report(&report, subset.target_ids().len(), options.inputs.scope().home())?;
     if report.is_complete() {
         Ok(())
     } else {
@@ -120,6 +125,7 @@ fn execute_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cleanup::Scope;
     use crate::targets::registry;
     use tempfile::TempDir;
 
@@ -146,7 +152,7 @@ mod tests {
                 .collect())
         }
 
-        fn confirm_deletion(&mut self, _total_size: u64) -> Result<bool, AppError> {
+        fn confirm_deletion(&mut self, _estimate: EstimateSummary) -> Result<bool, AppError> {
             self.confirmations += 1;
             Ok(self.confirmed)
         }
@@ -165,6 +171,7 @@ mod tests {
             .expect("Rust manifest is created");
         let scope = Scope::resolve(true, None, directory.path().to_path_buf())
             .expect("current scope resolves");
+        let inputs = InspectionInputs::for_test(scope);
         let python = registry::find("python").expect("python target is registered");
         let rust = registry::find("rust").expect("Rust target is registered");
         let mut decisions = RecordedDecisions {
@@ -177,7 +184,7 @@ mod tests {
         execute_with(
             CleanOptions {
                 selection: CleanSelection::PromptFrom(vec![python, rust]),
-                scope,
+                inputs,
                 verbose: false,
                 assume_yes: false,
             },
@@ -199,6 +206,7 @@ mod tests {
         std::fs::write(cache.join("module.pyc"), "cache").expect("cache file is created");
         let scope = Scope::resolve(true, None, directory.path().to_path_buf())
             .expect("current scope resolves");
+        let inputs = InspectionInputs::for_test(scope);
         let python = registry::find("python").expect("python target is registered");
         let mut decisions = RecordedDecisions {
             selections: 0,
@@ -210,7 +218,7 @@ mod tests {
         execute_with(
             CleanOptions {
                 selection: CleanSelection::Fixed(vec![python]),
-                scope,
+                inputs,
                 verbose: false,
                 assume_yes: false,
             },

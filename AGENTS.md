@@ -4,7 +4,8 @@
 
 `prf` is a Rust 2024 CLI for finding and removing development caches and generated artifacts. It
 is macOS-oriented: the catalog includes project-local Python, Rust, Node.js, Xcode, and SwiftPM
-artifacts, vetted macOS home-directory caches for Xcode and Homebrew, and Docker system data.
+artifacts; vetted mise, Bun, Homebrew, and Xcode caches; safe pnpm store pruning; and Docker system
+data.
 `scan` performs discovery without mutation; `clean` scans first and applies only actions represented
 by the resulting report. The default scan root is `~/Desktop`; `--current` selects the process
 working directory while suppressing global targets and home-relative discovery. Arbitrary scan-root
@@ -24,9 +25,12 @@ src/
   cleanup/
     target.rs      Target identity, scope support, and discovery contract
     scope.rs       Resolved default or current scope and captured home
+    environment.rs Captured environment-derived paths used during inspection
     discovery.rs   Standard discovery rules, inspections, diagnostics, and listings
     candidate.rs   Target-attributed cleanup actions
     action.rs      Filesystem and process action vocabulary
+    estimate.rs    Known bytes and explicitly unestimated action summaries
+    removal_path.rs Dynamic and catalog path safety validation
     plan.rs        Scanned candidates and canonical roots shared by estimation and application
     report.rs      Target-grouped scan reports and selected subsets
     apply.rs       Removal-plan execution and complete per-action outcomes
@@ -36,7 +40,7 @@ src/
     error.rs       Footprint-specific failure taxonomy
   targets/
     registry.rs    Authoritative ordered target catalog and CLI resolution
-    *.rs           One definition per target; Docker owns its CLI protocol and parser
+    *.rs           One definition per target; tool protocols and parsers stay target-private
   fs/              Filesystem removal
   output/          Byte/path display, reports, messages, progress styles, and prompts
 tests/
@@ -56,9 +60,10 @@ Unit tests are colocated under `#[cfg(test)]` in their owning source modules. Th
 selection and parsing logic, footprint contracts, and filesystem boundaries through temporary
 directories.
 Integration tests execute the compiled binary from `tests/`. `TestContext` creates state under
-`target/test_tmp`, assigns a temporary `HOME`, and pins `PATH` to a mock-command directory so a host
-Docker installation cannot enter a test accidentally. Unit tests receive environment-derived inputs
-directly and do not mutate process-global environment or working-directory state.
+`target/test_tmp`, assigns a temporary `HOME`, isolates cache path variables, and pins `PATH` to a
+mock-command directory so host optional tools cannot enter a test accidentally. Unit tests receive
+environment-derived inputs directly and do not mutate process-global environment or
+working-directory state.
 
 The local task surface is:
 
@@ -90,16 +95,16 @@ Applicable `HomePaths` rules are evaluated in addition to that root. Arbitrary r
 accepted.
 
 `--current` is not an alias for passing `.`. It resolves the current working directory, excludes
-targets whose `ScopeSupport` is `DefaultOnly`, and disables all `HomePaths` rules. Brew and Docker
-are currently default-only; Xcode, Python, Rust, and Node.js support both modes. `Scope` represents
-default and current modes as distinct variants, and environment inputs are captured once by CLI
-resolution.
+targets whose `ScopeSupport` is `DefaultOnly`, and disables all `HomePaths` rules. mise, Bun, pnpm,
+Brew, and Docker are default-only; Xcode, Python, Rust, and Node.js support both modes. `Scope`
+represents default and current modes as distinct variants, and environment inputs are captured once
+by CLI resolution.
 
 ### Contract Authorities
 
 `src/targets/registry.rs` is the sole ordered target catalog. CLI possible values, default and all
 selection, display order, case-insensitive resolution, and current-mode eligibility derive from it.
-Detailed discovery, planning, footprint, application, Docker, and output mechanics belong in
+Detailed discovery, planning, footprint, application, target protocols, and output mechanics belong in
 `docs/architecture.md`; supported command behavior belongs in `docs/usage.md`.
 
 ## Safety Invariants
@@ -116,6 +121,9 @@ Detailed discovery, planning, footprint, application, Docker, and output mechani
 - A path that disappears between discovery, measurement, and application is treated idempotently.
 - Removed, already-absent, retained, and failed actions remain distinguishable; retained or failed
   actions produce a non-zero result after the partial report.
+- pnpm pruning remains explicitly unestimated instead of treating its complete store size as
+  reclaimable.
+- Dynamically resolved cache paths cannot contain HOME, scan, working, or temporary roots.
 
 ## Documentation Responsibilities
 
