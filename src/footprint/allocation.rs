@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::fs;
 #[cfg(unix)]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(unix)]
 use std::sync::{Arc, Mutex};
 
 #[cfg(unix)]
@@ -222,7 +224,7 @@ struct LocalAllocation {
 
 #[cfg(unix)]
 impl LocalAllocation {
-    fn record(&mut self, metadata: &fs::Metadata, mut owners: Vec<RootId>) -> Result<(), Error> {
+    fn record(&mut self, metadata: &fs::Metadata, owners: &[RootId]) -> Result<(), Error> {
         let allocated = Estimate::from_bytes(
             metadata.blocks().checked_mul(UNIX_BLOCK_BYTES).ok_or(Error::Overflow)?,
         );
@@ -230,20 +232,17 @@ impl LocalAllocation {
             return Ok(());
         }
 
-        owners.sort_unstable();
-        owners.dedup();
-
         if metadata.file_type().is_file() && metadata.nlink() > 1 {
             self.links.push(LinkObservation {
                 identity: FileIdentity { device: metadata.dev(), inode: metadata.ino() },
                 allocated,
                 link_count: metadata.nlink(),
-                owners,
+                owners: owners.to_vec(),
             });
             return Ok(());
         }
 
-        for owner in owners {
+        for &owner in owners {
             let current = self.ordinary.get(&owner).copied().unwrap_or(Estimate::ZERO);
             self.ordinary.insert(owner, current.checked_add(allocated)?);
         }
@@ -293,23 +292,27 @@ impl Aggregate {
 struct WalkState {
     roots_by_path: HashMap<PathBuf, RootId>,
     aggregate: Mutex<Aggregate>,
+    cancelled: AtomicBool,
     error: Mutex<Option<Error>>,
 }
 
 #[cfg(unix)]
 impl WalkState {
-    fn owners_for(&self, path: &Path, inherited: &[RootId]) -> Vec<RootId> {
-        let mut owners = inherited.to_vec();
-        if let Some(root) = self.roots_by_path.get(path)
-            && !owners.contains(root)
-        {
-            owners.push(*root);
-        }
-        owners
+    fn owners_with_path_root(&self, path: &Path, inherited: &[RootId]) -> Option<Arc<[RootId]>> {
+        let root = *self.roots_by_path.get(path)?;
+        let insertion = match inherited.binary_search(&root) {
+            Ok(_) => return None,
+            Err(insertion) => insertion,
+        };
+        let mut owners = Vec::with_capacity(inherited.len() + 1);
+        owners.extend_from_slice(&inherited[..insertion]);
+        owners.push(root);
+        owners.extend_from_slice(&inherited[insertion..]);
+        Some(owners.into())
     }
 
     fn merge(&self, local: LocalAllocation) {
-        if self.has_error() {
+        if self.is_cancelled() {
             return;
         }
 
@@ -320,14 +323,17 @@ impl WalkState {
     }
 
     fn record_error(&self, error: Error) {
-        let mut stored = self.error.lock().expect("footprint error lock");
-        if stored.is_none() {
-            *stored = Some(error);
+        if self
+            .cancelled
+            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+        {
+            *self.error.lock().expect("footprint error lock") = Some(error);
         }
     }
 
-    fn has_error(&self) -> bool {
-        self.error.lock().expect("footprint error lock").is_some()
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Relaxed)
     }
 }
 
@@ -346,6 +352,7 @@ fn measure_unix(roots: &[Root]) -> Result<Index, Error> {
     let state = Arc::new(WalkState {
         roots_by_path,
         aggregate: Mutex::new(Aggregate::new(roots.len())),
+        cancelled: AtomicBool::new(false),
         error: Mutex::new(None),
     });
 
@@ -353,7 +360,7 @@ fn measure_unix(roots: &[Root]) -> Result<Index, Error> {
         for root in maximal_roots {
             let state = Arc::clone(&state);
             scope.spawn_fifo(move |scope| {
-                visit_root(scope, root.path, vec![root.id], state);
+                visit_root(scope, root.path, Arc::from([root.id]), state);
             });
         }
     });
@@ -385,10 +392,10 @@ fn measure_unix(roots: &[Root]) -> Result<Index, Error> {
 fn visit_root<'scope>(
     scope: &rayon::ScopeFifo<'scope>,
     path: PathBuf,
-    owners: Vec<RootId>,
+    owners: Arc<[RootId]>,
     state: Arc<WalkState>,
 ) {
-    if state.has_error() {
+    if state.is_cancelled() {
         return;
     }
 
@@ -401,9 +408,9 @@ fn visit_root<'scope>(
         }
     };
 
-    let owners = state.owners_for(&path, &owners);
+    let owners = state.owners_with_path_root(&path, owners.as_ref()).unwrap_or(owners);
     let mut local = LocalAllocation::default();
-    if let Err(error) = local.record(&metadata, owners.clone()) {
+    if let Err(error) = local.record(&metadata, owners.as_ref()) {
         state.record_error(error);
         return;
     }
@@ -418,10 +425,10 @@ fn visit_root<'scope>(
 fn visit_directory<'scope>(
     scope: &rayon::ScopeFifo<'scope>,
     path: PathBuf,
-    owners: Vec<RootId>,
+    owners: Arc<[RootId]>,
     state: Arc<WalkState>,
 ) {
-    if state.has_error() {
+    if state.is_cancelled() {
         return;
     }
 
@@ -436,7 +443,7 @@ fn visit_directory<'scope>(
 
     let mut local = LocalAllocation::default();
     for entry in entries {
-        if state.has_error() {
+        if state.is_cancelled() {
             return;
         }
 
@@ -457,13 +464,15 @@ fn visit_directory<'scope>(
                 return;
             }
         };
-        let child_owners = state.owners_for(&child_path, &owners);
-        if let Err(error) = local.record(&metadata, child_owners.clone()) {
+        let extended_owners = state.owners_with_path_root(&child_path, owners.as_ref());
+        let entry_owners = extended_owners.as_deref().unwrap_or(owners.as_ref());
+        if let Err(error) = local.record(&metadata, entry_owners) {
             state.record_error(error);
             return;
         }
 
         if metadata.is_dir() {
+            let child_owners = extended_owners.unwrap_or_else(|| Arc::clone(&owners));
             let state = Arc::clone(&state);
             scope.spawn_fifo(move |scope| {
                 visit_directory(scope, child_path, child_owners, state);

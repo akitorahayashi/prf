@@ -63,13 +63,14 @@ impl ScanReport {
         let catalog = Arc::new(catalog);
         let footprint = Arc::new(footprint);
         let target_ids = targets.iter().map(|target| target.id()).collect::<Vec<_>>();
-        Self::view(catalog, footprint, &target_ids)
+        Self::view(catalog, footprint, &target_ids, None)
     }
 
     fn view(
         catalog: Arc<RemovalCatalog>,
         footprint: Arc<Index>,
         targets: &[TargetId],
+        cached_standalone_estimates: Option<&BTreeMap<TargetId, EstimateSummary>>,
     ) -> Result<Self, AppError> {
         let candidates = catalog.candidates();
         let mut indices_by_target =
@@ -91,11 +92,19 @@ impl ScanReport {
         let mut reports = BTreeMap::new();
         let mut standalone_estimates = BTreeMap::new();
         for (target, indices) in &indices_by_target {
-            let target_plan = catalog.plan(indices)?;
-            let standalone = EstimateSummary::new(
-                footprint.breakdown(target_plan.roots(), target_plan.reported())?.total(),
-                target_plan.unestimated_action_count(),
-            );
+            let standalone = if indices.is_empty() {
+                EstimateSummary::ZERO
+            } else if let Some(estimate) =
+                cached_standalone_estimates.and_then(|estimates| estimates.get(target)).copied()
+            {
+                estimate
+            } else {
+                let target_plan = catalog.plan(indices)?;
+                EstimateSummary::new(
+                    footprint.breakdown(target_plan.roots(), target_plan.reported())?.total(),
+                    target_plan.unestimated_action_count(),
+                )
+            };
             standalone_estimates.insert(*target, standalone);
             if indices.is_empty() {
                 continue;
@@ -136,7 +145,12 @@ impl ScanReport {
 
     pub fn subset(&self, targets: &[&Target]) -> Result<Self, AppError> {
         let target_ids = targets.iter().map(|target| target.id()).collect::<Vec<_>>();
-        Self::view(Arc::clone(&self.catalog), Arc::clone(&self.footprint), &target_ids)
+        Self::view(
+            Arc::clone(&self.catalog),
+            Arc::clone(&self.footprint),
+            &target_ids,
+            Some(&self.standalone_estimates),
+        )
     }
 
     pub fn standalone_estimate(&self, target: TargetId) -> Result<EstimateSummary, AppError> {

@@ -46,22 +46,14 @@ fn inspect(target: TargetId, inputs: &InspectionInputs) -> Result<Inspection, Ap
         Ok(_) => {}
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Inspection::default()),
         Err(source) => {
-            return Err(AppError::PathOperation {
-                operation: "inspect pnpm store path",
-                path,
-                source,
-            });
+            return Err(AppError::path_operation("inspect pnpm store path", path, source));
         }
     }
-    let path = fs::canonicalize(&path).map_err(|source| AppError::PathOperation {
-        operation: "resolve pnpm store path",
-        path: path.clone(),
-        source,
+    let path = fs::canonicalize(&path).map_err(|source| {
+        AppError::path_operation("resolve pnpm store path", path.clone(), source)
     })?;
-    let metadata = fs::metadata(&path).map_err(|source| AppError::PathOperation {
-        operation: "inspect resolved pnpm store path",
-        path: path.clone(),
-        source,
+    let metadata = fs::metadata(&path).map_err(|source| {
+        AppError::path_operation("inspect resolved pnpm store path", path.clone(), source)
     })?;
     if !metadata.is_dir() {
         return Err(AppError::Discovery(format!(

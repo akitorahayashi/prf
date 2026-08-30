@@ -5,7 +5,7 @@ use indicatif::{MultiProgress, ProgressBar};
 use crate::cleanup::{EstimateSummary, InspectionInputs, Target, apply_plan};
 use crate::error::AppError;
 use crate::output::messages;
-use crate::output::progress::deletion_progress_style;
+use crate::output::progress::deletion_style;
 use crate::output::prompt::{confirm_deletion, prompt_for_targets};
 use crate::output::report::{print_cleanup_report, print_deletion_plan, print_stdout_line};
 
@@ -57,32 +57,32 @@ fn execute_with(
     options: CleanOptions,
     decisions: &mut impl DecisionSource,
 ) -> Result<(), AppError> {
-    let (targets, prompt_for_selection) = match options.selection {
-        CleanSelection::PromptFrom(targets) => (targets, true),
-        CleanSelection::Fixed(targets) => (targets, false),
+    let scanned_targets = match &options.selection {
+        CleanSelection::PromptFrom(targets) | CleanSelection::Fixed(targets) => targets,
     };
     let progress = Arc::new(MultiProgress::new());
-    let report = scan_targets(&targets, &options.inputs, &progress)?;
+    let report = scan_targets(scanned_targets, &options.inputs, &progress)?;
 
     if report.is_empty() {
         print_stdout_line(messages::nothing_to_delete())?;
         return Ok(());
     }
 
-    let selected_targets = if prompt_for_selection {
-        match decisions.select_targets(&report, &targets) {
-            Ok(targets) => targets,
-            Err(AppError::Cancelled) => {
-                print_stdout_line(messages::aborted())?;
-                return Ok(());
-            }
-            Err(error) => return Err(error),
+    let (selected_targets, subset) = match options.selection {
+        CleanSelection::PromptFrom(targets) => {
+            let selected = match decisions.select_targets(&report, &targets) {
+                Ok(targets) => targets,
+                Err(AppError::Cancelled) => {
+                    print_stdout_line(messages::aborted())?;
+                    return Ok(());
+                }
+                Err(error) => return Err(error),
+            };
+            let subset = report.subset(&selected)?;
+            (selected, subset)
         }
-    } else {
-        targets
+        CleanSelection::Fixed(targets) => (targets, report),
     };
-
-    let subset = report.subset(&selected_targets)?;
     if subset.is_empty() {
         print_stdout_line(messages::nothing_to_delete())?;
         return Ok(());
@@ -101,7 +101,7 @@ fn execute_with(
 
     let plan = subset.removal_plan();
     let deletion_bar = progress.add(ProgressBar::new(0));
-    deletion_bar.set_style(deletion_progress_style());
+    deletion_bar.set_style(deletion_style());
     let report = apply_plan(
         plan,
         subset.footprint(),
@@ -110,7 +110,7 @@ fn execute_with(
     );
     deletion_bar.finish_and_clear();
 
-    progress.println(messages::deletion_complete(report.planned_count(), plan.action_count()))?;
+    progress.println(messages::deletion_complete(report.planned_count()))?;
     print_cleanup_report(&report, subset.target_ids().len(), options.inputs.scope().home())?;
     if report.is_complete() {
         Ok(())

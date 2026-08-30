@@ -1,5 +1,3 @@
-//! Construction of individual user-facing message lines.
-
 use crate::cleanup::EstimateSummary;
 
 use super::bytes::format_bytes;
@@ -9,27 +7,22 @@ pub fn discovering(display_name: &str) -> String {
 }
 
 pub fn discovery_complete(display_name: &str, count: usize) -> String {
-    format!(
-        "✔︎ {display_name} discovery complete ({} item{})",
-        count,
-        if count == 1 { "" } else { "s" }
-    )
+    format!("✔︎ {display_name} discovery complete ({count} {})", plural(count, "item", "items"))
 }
 
 pub fn calculating_footprint(count: usize) -> String {
-    format!("Calculating footprint... ({} item{})", count, if count == 1 { "" } else { "s" })
+    format!("Calculating footprint... ({count} {})", plural(count, "item", "items"))
 }
 
 pub fn footprint_calculation_complete(count: usize) -> String {
     format!(
-        "{count}/{count} Footprint calculation complete ({} item{})",
-        count,
-        if count == 1 { "" } else { "s" }
+        "{count}/{count} Footprint calculation complete ({count} {})",
+        plural(count, "item", "items")
     )
 }
 
-pub fn deletion_complete(completed: usize, planned: usize) -> String {
-    format!("{completed}/{planned} Cleanup actions attempted")
+pub fn deletion_complete(attempted: usize) -> String {
+    format!("{attempted}/{attempted} Cleanup actions attempted")
 }
 
 pub fn nothing_to_delete() -> &'static str {
