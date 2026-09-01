@@ -8,7 +8,7 @@ use crate::cleanup::{Inspection, InspectionInputs, RemovalCatalog, ScanReport, T
 use crate::error::AppError;
 use crate::footprint::Index;
 use crate::output::messages;
-use crate::output::progress::{discovery_spinner_style, footprint_spinner_style};
+use crate::output::progress::spinner_style;
 use crate::output::report::{print_diagnostics, print_list_results, print_scan_report};
 
 pub struct ScanOptions {
@@ -50,7 +50,7 @@ pub fn scan_targets(
         return Ok(ScanReport::empty());
     }
 
-    let discovery_style = Arc::new(discovery_spinner_style());
+    let discovery_style = Arc::new(spinner_style());
     let discovery_progress = Arc::clone(progress);
     let inspections: Result<Vec<Inspection>, AppError> = targets
         .par_iter()
@@ -82,7 +82,7 @@ pub fn scan_targets(
 
     let total_items = candidates.len();
     let footprint_spinner = progress.add(ProgressBar::new_spinner());
-    footprint_spinner.set_style(footprint_spinner_style());
+    footprint_spinner.set_style(spinner_style());
     footprint_spinner.enable_steady_tick(Duration::from_millis(100));
     footprint_spinner.set_message(messages::calculating_footprint(total_items));
     let measurement = (|| {

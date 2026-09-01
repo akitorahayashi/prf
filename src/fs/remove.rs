@@ -17,7 +17,7 @@ pub fn remove_file(path: &Path) -> Result<RemovalStatus, AppError> {
     match fs::remove_file(path) {
         Ok(()) => Ok(RemovalStatus::Removed),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(RemovalStatus::AlreadyAbsent),
-        Err(source) => Err(path_error("remove file or symbolic link", path, source)),
+        Err(source) => Err(AppError::path_operation("remove file or symbolic link", path, source)),
     }
 }
 
@@ -25,7 +25,7 @@ pub fn safe_remove_dir_all(path: &Path) -> Result<RemovalStatus, AppError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_dir() => {}
         Ok(_) => {
-            return Err(path_error(
+            return Err(AppError::path_operation(
                 "inspect directory",
                 path,
                 io::Error::new(io::ErrorKind::InvalidInput, "entry is not a directory"),
@@ -34,7 +34,9 @@ pub fn safe_remove_dir_all(path: &Path) -> Result<RemovalStatus, AppError> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             return Ok(RemovalStatus::AlreadyAbsent);
         }
-        Err(source) => return Err(path_error("inspect directory", path, source)),
+        Err(source) => {
+            return Err(AppError::path_operation("inspect directory", path, source));
+        }
     }
 
     for entry_result in WalkDir::new(path).contents_first(true).into_iter() {
@@ -49,7 +51,7 @@ pub fn safe_remove_dir_all(path: &Path) -> Result<RemovalStatus, AppError> {
             }
             Err(error) => {
                 let failed_path = error.path().unwrap_or(path);
-                return Err(path_error(
+                return Err(AppError::path_operation(
                     "traverse directory",
                     failed_path,
                     io::Error::other(error.to_string()),
@@ -63,7 +65,11 @@ pub fn safe_remove_dir_all(path: &Path) -> Result<RemovalStatus, AppError> {
                 Ok(()) => {}
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {}
                 Err(source) => {
-                    return Err(path_error("remove file or symbolic link", entry_path, source));
+                    return Err(AppError::path_operation(
+                        "remove file or symbolic link",
+                        entry_path,
+                        source,
+                    ));
                 }
             }
         } else if entry.file_type().is_dir() {
@@ -73,7 +79,7 @@ pub fn safe_remove_dir_all(path: &Path) -> Result<RemovalStatus, AppError> {
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {}
                 Err(error) if error.kind() == io::ErrorKind::DirectoryNotEmpty => {}
                 Err(source) => {
-                    return Err(path_error("remove directory", entry_path, source));
+                    return Err(AppError::path_operation("remove directory", entry_path, source));
                 }
             }
         }
@@ -82,12 +88,8 @@ pub fn safe_remove_dir_all(path: &Path) -> Result<RemovalStatus, AppError> {
     match fs::symlink_metadata(path) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(RemovalStatus::Removed),
         Ok(_) => Ok(RemovalStatus::Retained),
-        Err(source) => Err(path_error("inspect cleanup result", path, source)),
+        Err(source) => Err(AppError::path_operation("inspect cleanup result", path, source)),
     }
-}
-
-fn path_error(operation: &'static str, path: &Path, source: io::Error) -> AppError {
-    AppError::PathOperation { operation, path: path.to_path_buf(), source }
 }
 
 #[cfg(test)]

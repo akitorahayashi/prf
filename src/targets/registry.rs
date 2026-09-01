@@ -32,11 +32,7 @@ pub fn find(name: &str) -> Option<&'static Target> {
 pub fn eligible(mode: ScopeMode) -> Result<Vec<&'static Target>, AppError> {
     validate()?;
 
-    Ok(TARGETS
-        .iter()
-        .copied()
-        .filter(|target| mode != ScopeMode::Current || target.scope_support().supports_current())
-        .collect())
+    Ok(TARGETS.iter().copied().filter(|target| target.scope_support().supports(mode)).collect())
 }
 
 pub fn resolve(names: &[String], mode: ScopeMode) -> Result<Vec<&'static Target>, AppError> {
@@ -54,7 +50,7 @@ pub fn resolve(names: &[String], mode: ScopeMode) -> Result<Vec<&'static Target>
     if mode == ScopeMode::Current {
         let unsupported: Vec<&str> = selected
             .iter()
-            .filter(|target| !target.scope_support().supports_current())
+            .filter(|target| !target.scope_support().supports(mode))
             .map(|target| target.id().as_str())
             .collect();
         if !unsupported.is_empty() {

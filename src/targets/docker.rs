@@ -112,21 +112,7 @@ fn parse_reclaimable_total(stdout: &str) -> Result<u64, AppError> {
 }
 
 fn parse_reclaimable_size(token: &str) -> Result<Byte, AppError> {
-    if let Ok(size) = Byte::parse_str(token, true) {
-        return Ok(size);
-    }
-
-    let split_index = token
-        .char_indices()
-        .find(|(_, character)| !(character.is_ascii_digit() || *character == '.'))
-        .map(|(index, _)| index)
-        .ok_or_else(|| AppError::Discovery(format!("invalid Docker size '{token}'")))?;
-    let (number, unit) = token.split_at(split_index);
-    if number.is_empty() || unit.trim().is_empty() {
-        return Err(AppError::Discovery(format!("invalid Docker size '{token}'")));
-    }
-
-    Byte::parse_str(format!("{} {}", number, unit.trim()), true)
+    Byte::parse_str(token, true)
         .map_err(|error| AppError::Discovery(format!("invalid Docker size '{token}': {error}")))
 }
 

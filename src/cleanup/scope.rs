@@ -29,9 +29,9 @@ impl Scope {
         Ok(Self::Default { root, home })
     }
 
-    pub fn roots(&self) -> &[PathBuf] {
+    pub fn root(&self) -> &Path {
         match self {
-            Self::Default { root, .. } | Self::Current { root } => std::slice::from_ref(root),
+            Self::Default { root, .. } | Self::Current { root } => root,
         }
     }
 
@@ -40,10 +40,6 @@ impl Scope {
             Self::Default { .. } => ScopeMode::Default,
             Self::Current { .. } => ScopeMode::Current,
         }
-    }
-
-    pub const fn is_current(&self) -> bool {
-        matches!(self, Self::Current { .. })
     }
 
     pub fn home(&self) -> Option<&Path> {
@@ -67,7 +63,7 @@ mod tests {
         struct Case {
             current: bool,
             home: Option<PathBuf>,
-            expected_roots: Result<Vec<PathBuf>, &'static str>,
+            expected_root: Result<PathBuf, &'static str>,
             expected_mode: ScopeMode,
             expected_home: Option<PathBuf>,
         }
@@ -76,28 +72,28 @@ mod tests {
             Case {
                 current: false,
                 home: Some(path("/home/user")),
-                expected_roots: Ok(vec![path("/home/user/Desktop")]),
+                expected_root: Ok(path("/home/user/Desktop")),
                 expected_mode: ScopeMode::Default,
                 expected_home: Some(path("/home/user")),
             },
             Case {
                 current: true,
                 home: Some(path("/home/user")),
-                expected_roots: Ok(vec![path("/working")]),
+                expected_root: Ok(path("/working")),
                 expected_mode: ScopeMode::Current,
                 expected_home: None,
             },
             Case {
                 current: true,
                 home: None,
-                expected_roots: Ok(vec![path("/working")]),
+                expected_root: Ok(path("/working")),
                 expected_mode: ScopeMode::Current,
                 expected_home: None,
             },
             Case {
                 current: false,
                 home: None,
-                expected_roots: Err("home"),
+                expected_root: Err("home"),
                 expected_mode: ScopeMode::Default,
                 expected_home: None,
             },
@@ -105,10 +101,10 @@ mod tests {
 
         for case in cases {
             let result = Scope::resolve(case.current, case.home, path("/working"));
-            match case.expected_roots {
+            match case.expected_root {
                 Ok(expected) => {
                     let scope = result.expect("scope resolves");
-                    assert_eq!(scope.roots(), expected);
+                    assert_eq!(scope.root(), expected);
                     assert_eq!(scope.mode(), case.expected_mode);
                     assert_eq!(scope.home(), case.expected_home.as_deref());
                 }

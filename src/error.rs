@@ -4,7 +4,6 @@ use std::process::ExitStatus;
 
 use thiserror::Error;
 
-/// Application-wide error type for the prf CLI.
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error("I/O error: {0}")]
@@ -64,4 +63,14 @@ pub enum AppError {
 
     #[error("Operation cancelled by user")]
     Cancelled,
+}
+
+impl AppError {
+    pub(crate) fn path_operation(
+        operation: &'static str,
+        path: impl Into<PathBuf>,
+        source: io::Error,
+    ) -> Self {
+        Self::PathOperation { operation, path: path.into(), source }
+    }
 }

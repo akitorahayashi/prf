@@ -12,7 +12,6 @@ use super::{Action, ActionEstimate, Candidate, EntryKind};
 
 #[derive(Debug, Clone)]
 struct CatalogRoot {
-    id: RootId,
     path: PathBuf,
     kind: EntryKind,
 }
@@ -44,14 +43,14 @@ impl RemovalCatalog {
                                 resolved.display()
                             )));
                         }
-                        candidate_roots.push(Some(roots[index].id));
+                        candidate_roots.push(Some(RootId::new(index)));
                         continue;
                     }
 
-                    let id = RootId::new(roots.len());
-                    roots_by_path.insert(resolved.clone(), roots.len());
-                    roots.push(CatalogRoot { id, path: resolved, kind: *kind });
-                    candidate_roots.push(Some(id));
+                    let index = roots.len();
+                    roots_by_path.insert(resolved.clone(), index);
+                    roots.push(CatalogRoot { path: resolved, kind: *kind });
+                    candidate_roots.push(Some(RootId::new(index)));
                 }
                 Action::RunProcess { .. } => candidate_roots.push(None),
             }
@@ -65,7 +64,11 @@ impl RemovalCatalog {
     }
 
     pub fn measurement_roots(&self) -> Vec<Root> {
-        self.roots.iter().map(|root| Root::new(root.id, root.path.clone())).collect()
+        self.roots
+            .iter()
+            .enumerate()
+            .map(|(index, root)| Root::new(RootId::new(index), root.path.clone()))
+            .collect()
     }
 
     pub fn plan(&self, selected: &[usize]) -> Result<RemovalPlan, AppError> {

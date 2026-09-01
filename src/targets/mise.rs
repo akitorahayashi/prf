@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::cleanup::discovery::inspect_path;
+use crate::cleanup::discovery::inspect_external_path;
 use crate::cleanup::{Discovery, Inspection, InspectionInputs, ScopeSupport, Target, TargetId};
 use crate::error::AppError;
 
@@ -18,8 +18,7 @@ fn inspect(target: TargetId, inputs: &InspectionInputs) -> Result<Inspection, Ap
         environment.xdg_cache_home(),
         environment.home(),
     )?;
-    inputs.validate_external_cache_path(&path)?;
-    Ok(inspect_path(target, path))
+    inspect_external_path(target, inputs, path)
 }
 
 fn resolve_cache_path(

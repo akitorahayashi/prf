@@ -3,6 +3,7 @@ use std::fmt;
 use crate::error::AppError;
 
 use super::discovery::{Discovery, Inspection, InspectionInputs};
+use super::scope::ScopeMode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TargetId(&'static str);
@@ -30,8 +31,11 @@ pub enum ScopeSupport {
 }
 
 impl ScopeSupport {
-    pub const fn supports_current(self) -> bool {
-        matches!(self, Self::AllModes)
+    pub const fn supports(self, mode: ScopeMode) -> bool {
+        match self {
+            Self::AllModes => true,
+            Self::DefaultOnly => matches!(mode, ScopeMode::Default),
+        }
     }
 }
 
@@ -65,7 +69,7 @@ impl Target {
     }
 
     pub fn inspect(&self, inputs: &InspectionInputs) -> Result<Inspection, AppError> {
-        if inputs.scope().is_current() && !self.scope_support.supports_current() {
+        if !self.scope_support.supports(inputs.scope().mode()) {
             return Err(AppError::UnsupportedCurrentModeTarget(self.id.to_string()));
         }
         self.discovery.inspect(self.id, inputs)

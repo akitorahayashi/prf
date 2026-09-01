@@ -3,6 +3,25 @@ use predicates::prelude::*;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
 
+fn install_failing_docker_prune(ctx: &TestContext) {
+    ctx.create_mock_command(
+        "docker",
+        r#"#!/bin/sh
+if [ "$1" = "info" ]; then
+  exit 0
+fi
+if [ "$1" = "system" ] && [ "$2" = "df" ]; then
+  echo '{"Type":"Images","Reclaimable":"1GB"}'
+  exit 0
+fi
+if [ "$1" = "system" ] && [ "$2" = "prune" ]; then
+  exit 7
+fi
+exit 0
+"#,
+    );
+}
+
 #[test]
 fn clean_nodejs_yes_deletes_directories() {
     let ctx = TestContext::new();
@@ -162,22 +181,7 @@ exit 0
 #[test]
 fn clean_reports_docker_process_failure() {
     let ctx = TestContext::new();
-    ctx.create_mock_command(
-        "docker",
-        r#"#!/bin/sh
-if [ "$1" = "info" ]; then
-  exit 0
-fi
-if [ "$1" = "system" ] && [ "$2" = "df" ]; then
-  echo '{"Type":"Images","Reclaimable":"1GB"}'
-  exit 0
-fi
-if [ "$1" = "system" ] && [ "$2" = "prune" ]; then
-  exit 7
-fi
-exit 0
-"#,
-    );
+    install_failing_docker_prune(&ctx);
 
     ctx.cli()
         .arg("clean")
@@ -225,22 +229,7 @@ fn clean_accepts_multiple_targets_and_reports_a_later_process_failure() {
     let ctx = TestContext::new();
     let cache = ctx.write_home_file("Desktop/workspace/node_modules/index.js", "cache");
     let cache_dir = cache.parent().expect("cache file has parent").to_path_buf();
-    ctx.create_mock_command(
-        "docker",
-        r#"#!/bin/sh
-if [ "$1" = "info" ]; then
-  exit 0
-fi
-if [ "$1" = "system" ] && [ "$2" = "df" ]; then
-  echo '{"Type":"Images","Reclaimable":"1GB"}'
-  exit 0
-fi
-if [ "$1" = "system" ] && [ "$2" = "prune" ]; then
-  exit 7
-fi
-exit 0
-"#,
-    );
+    install_failing_docker_prune(&ctx);
 
     ctx.cli()
         .arg("clean")

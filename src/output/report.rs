@@ -1,7 +1,9 @@
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+use crate::cleanup::report::{CandidateReport, TargetReport};
 use crate::cleanup::{
     Action, ActionOutcome, ApplyReport, Inspection, Listing, PathStatus, ProcessStatus, ScanReport,
     Target,
@@ -21,11 +23,46 @@ pub fn display_path(path: &Path, home: Option<&Path>) -> String {
     path.display().to_string()
 }
 
-fn candidate_display(action: &Action, home: Option<&Path>) -> String {
+fn candidate_display<'a>(action: &'a Action, home: Option<&Path>) -> Cow<'a, str> {
     match action {
-        Action::RemovePath { path, .. } => display_path(path, home),
-        Action::RunProcess { label, .. } => label.clone(),
+        Action::RemovePath { path, .. } => Cow::Owned(display_path(path, home)),
+        Action::RunProcess { label, .. } => Cow::Borrowed(label),
     }
+}
+
+fn write_target_summary(
+    output: &mut impl Write,
+    target: &Target,
+    report: &TargetReport,
+) -> io::Result<()> {
+    writeln!(
+        output,
+        "- {:<8} {:>10} across {} item(s)",
+        target.display_name(),
+        format_estimate_compact(report.estimate()),
+        report.candidates.len()
+    )
+}
+
+fn write_candidate(
+    output: &mut impl Write,
+    report: &CandidateReport,
+    home: Option<&Path>,
+) -> io::Result<()> {
+    writeln!(output, "    • {}", candidate_display(report.candidate.action(), home))
+}
+
+fn write_candidate_with_estimate(
+    output: &mut impl Write,
+    report: &CandidateReport,
+    home: Option<&Path>,
+) -> io::Result<()> {
+    writeln!(
+        output,
+        "    • {:<60} {}",
+        candidate_display(report.candidate.action(), home),
+        format_action_estimate(report.estimate())
+    )
 }
 
 pub fn print_stdout_line(message: &str) -> Result<(), AppError> {
@@ -38,8 +75,8 @@ pub fn print_diagnostics(inspections: &[Inspection]) -> Result<(), AppError> {
     let mut output = stderr.lock();
     let mut rendered = HashSet::new();
     for diagnostic in inspections.iter().flat_map(|inspection| &inspection.diagnostics) {
-        if rendered.insert(&diagnostic.message) {
-            writeln!(output, "Warning: {}", diagnostic.message)?;
+        if rendered.insert(diagnostic) {
+            writeln!(output, "Warning: {diagnostic}")?;
         }
     }
     Ok(())
@@ -56,21 +93,10 @@ pub fn print_scan_report(
     writeln!(output, "Scan results:")?;
     for target in targets {
         if let Some(target_report) = report.report_for(target.id()) {
-            writeln!(
-                output,
-                "- {:<8} {:>10} across {} item(s)",
-                target.display_name(),
-                format_estimate_compact(target_report.estimate()),
-                target_report.candidates.len()
-            )?;
+            write_target_summary(&mut output, target, target_report)?;
             if verbose {
                 for candidate_report in &target_report.candidates {
-                    writeln!(
-                        output,
-                        "    • {:<60} {}",
-                        candidate_display(candidate_report.candidate.action(), home),
-                        format_action_estimate(candidate_report.estimate())
-                    )?;
+                    write_candidate_with_estimate(&mut output, candidate_report, home)?;
                 }
             }
         }
@@ -122,27 +148,12 @@ pub fn print_deletion_plan(
     writeln!(output, "Deletion plan:")?;
     for target in targets {
         if let Some(target_report) = report.report_for(target.id()) {
-            writeln!(
-                output,
-                "- {:<8} {:>10} across {} item(s)",
-                target.display_name(),
-                format_estimate_compact(target_report.estimate()),
-                target_report.candidates.len()
-            )?;
+            write_target_summary(&mut output, target, target_report)?;
             for candidate_report in &target_report.candidates {
                 if verbose {
-                    writeln!(
-                        output,
-                        "    • {:<60} {}",
-                        candidate_display(candidate_report.candidate.action(), home),
-                        format_action_estimate(candidate_report.estimate())
-                    )?;
+                    write_candidate_with_estimate(&mut output, candidate_report, home)?;
                 } else {
-                    writeln!(
-                        output,
-                        "    • {}",
-                        candidate_display(candidate_report.candidate.action(), home)
-                    )?;
+                    write_candidate(&mut output, candidate_report, home)?;
                 }
             }
         }

@@ -21,12 +21,6 @@ jobs:
           install-mise: 'true'
           mise-tools: just cargo:cargo-tarpaulin
 
-      - name: Reset tarpaulin runtime outputs
-        run: |
-          rm -rf target/tarpaulin
-          rm -rf coverage
-        shell: bash
-
       - name: Generate coverage
         run: mise exec -- just coverage
         env:

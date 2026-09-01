@@ -1,5 +1,3 @@
-//! Library entry point for the prf CLI.
-
 mod app;
 mod cleanup;
 mod cli;
